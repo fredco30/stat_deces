@@ -473,65 +473,142 @@ def render_analysis_tab(year, month, dept, sex):
     """Render visual analysis dashboard."""
     st.markdown("### 📈 Analyse Visuelle")
 
-    if not year:
-        st.warning("Veuillez sélectionner une année dans les filtres.")
+    # Get available years for comparison
+    available_years = etl_utils.get_available_years()
+
+    if not available_years:
+        st.warning("Aucune donnée disponible.")
         return
 
-    # Check if data exists
-    total = etl_utils.get_total_deaths(year, month, dept, sex)
-    if total == 0:
-        st.warning("Aucune donnée disponible pour les filtres sélectionnés.")
+    # Multi-year selector
+    st.markdown("#### 🎯 Sélection des années à comparer")
+
+    col1, col2 = st.columns([3, 1])
+
+    with col1:
+        # Default selection: current year if available, otherwise the most recent
+        default_years = [year] if year and year in available_years else [available_years[0]]
+
+        selected_years = st.multiselect(
+            "Choisissez les années à comparer (plusieurs possibles)",
+            options=available_years,
+            default=default_years,
+            help="Sélectionnez une ou plusieurs années pour comparer les évolutions"
+        )
+
+    with col2:
+        # Quick select buttons
+        if st.button("📊 Toutes les années"):
+            selected_years = available_years
+            st.rerun()
+
+    if not selected_years:
+        st.warning("Veuillez sélectionner au moins une année.")
         return
 
-    # Graph 1: Daily evolution comparison (Year N vs N-1)
+    # Palette de couleurs distinctes pour les courbes
+    color_palette = [
+        '#e74c3c',  # Rouge vif
+        '#3498db',  # Bleu
+        '#2ecc71',  # Vert
+        '#f39c12',  # Orange
+        '#9b59b6',  # Violet
+        '#1abc9c',  # Turquoise
+        '#e67e22',  # Orange foncé
+        '#34495e',  # Gris foncé
+        '#16a085',  # Cyan foncé
+        '#c0392b',  # Rouge foncé
+        '#27ae60',  # Vert foncé
+        '#2980b9',  # Bleu foncé
+        '#8e44ad',  # Violet foncé
+        '#d35400',  # Orange brûlé
+        '#c0392b',  # Bordeaux
+    ]
+
+    # Graph 1: Daily evolution comparison (Multi-year)
     st.markdown("#### 📉 Évolution journalière comparée")
-
-    df_current = etl_utils.get_daily_deaths(year, month, dept, sex)
-    df_previous = etl_utils.get_daily_deaths(year - 1, month, dept, sex)
 
     fig = go.Figure()
 
-    if not df_current.empty:
-        df_current['datedeces'] = pd.to_datetime(df_current['datedeces'])
-        df_current['day_of_year'] = df_current['datedeces'].dt.dayofyear
+    for idx, selected_year in enumerate(sorted(selected_years, reverse=True)):
+        df_year = etl_utils.get_daily_deaths(selected_year, month, dept, sex)
 
-        fig.add_trace(go.Scatter(
-            x=df_current['day_of_year'],
-            y=df_current['count'],
-            mode='lines',
-            name=str(year),
-            line=dict(color='#3498db', width=2)
-        ))
+        if not df_year.empty:
+            df_year['datedeces'] = pd.to_datetime(df_year['datedeces'])
+            df_year['day_of_year'] = df_year['datedeces'].dt.dayofyear
 
-    if not df_previous.empty:
-        df_previous['datedeces'] = pd.to_datetime(df_previous['datedeces'])
-        df_previous['day_of_year'] = df_previous['datedeces'].dt.dayofyear
+            # Utiliser une couleur de la palette
+            color = color_palette[idx % len(color_palette)]
 
-        fig.add_trace(go.Scatter(
-            x=df_previous['day_of_year'],
-            y=df_previous['count'],
-            mode='lines',
-            name=str(year - 1),
-            line=dict(color='#95a5a6', width=2, dash='dot')
-        ))
+            # L'année la plus récente est en trait plein et plus épais
+            is_most_recent = (selected_year == max(selected_years))
+            line_style = dict(
+                color=color,
+                width=5 if is_most_recent else 4,
+                dash='solid' if is_most_recent else 'solid'
+            )
+
+            fig.add_trace(go.Scatter(
+                x=df_year['day_of_year'],
+                y=df_year['count'],
+                mode='lines',
+                name=f"{selected_year}" + (" ⭐" if is_most_recent else ""),
+                line=line_style,
+                hovertemplate='<b>%{fullData.name}</b><br>Jour: %{x}<br>Décès: %{y}<extra></extra>'
+            ))
 
     fig.update_layout(
         xaxis_title="Jour de l'année",
         yaxis_title="Nombre de décès",
-        height=400,
+        height=500,
         hovermode='x unified',
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        legend=dict(
+            orientation="v",
+            yanchor="top",
+            y=0.99,
+            xanchor="right",
+            x=0.99,
+            bgcolor="rgba(255, 255, 255, 0.8)",
+            bordercolor="rgba(0, 0, 0, 0.2)",
+            borderwidth=1
+        ),
+        plot_bgcolor='rgba(250, 250, 250, 0.5)',
+        font=dict(size=12)
     )
+
+    # Ajouter une grille pour faciliter la lecture
+    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(200, 200, 200, 0.3)')
+    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(200, 200, 200, 0.3)')
+
     st.plotly_chart(fig, use_container_width=True)
+
+    # Statistiques comparatives
+    if len(selected_years) > 1:
+        st.markdown("#### 📊 Statistiques comparatives")
+        stats_cols = st.columns(len(selected_years))
+
+        for idx, selected_year in enumerate(sorted(selected_years, reverse=True)):
+            with stats_cols[idx]:
+                total_year = etl_utils.get_total_deaths(selected_year, month, dept, sex)
+                avg_age = etl_utils.get_average_age(selected_year, month, dept, sex)
+
+                st.metric(
+                    label=f"📅 {selected_year}",
+                    value=f"{total_year:,}".replace(",", " "),
+                    delta=f"Âge moy: {avg_age:.1f} ans" if avg_age else None
+                )
 
     # Two columns for heatmap and pyramid
     col1, col2 = st.columns(2)
 
+    # Use the most recent selected year for heatmap and pyramid
+    display_year = max(selected_years)
+
     with col1:
         # Graph 2: Calendar Heatmap
-        st.markdown("#### 🗓️ Heatmap Calendaire")
+        st.markdown(f"#### 🗓️ Heatmap Calendaire ({display_year})")
 
-        df_heatmap = etl_utils.get_deaths_by_month_day(year, dept, sex)
+        df_heatmap = etl_utils.get_deaths_by_month_day(display_year, dept, sex)
 
         if not df_heatmap.empty:
             # Pivot for heatmap
@@ -555,9 +632,9 @@ def render_analysis_tab(year, month, dept, sex):
 
     with col2:
         # Graph 3: Age Pyramid
-        st.markdown("#### 👥 Pyramide des âges")
+        st.markdown(f"#### 👥 Pyramide des âges ({display_year})")
 
-        df_pyramid = etl_utils.get_age_pyramid_data(year, month, dept)
+        df_pyramid = etl_utils.get_age_pyramid_data(display_year, month, dept)
 
         if not df_pyramid.empty:
             # Separate men and women
