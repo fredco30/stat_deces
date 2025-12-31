@@ -232,7 +232,8 @@ def render_import_tab():
         st.markdown("""
         **Instructions:**
         - Uploadez les fichiers CSV des décès de l'INSEE
-        - Format attendu: séparateur `;` avec colonnes `nomprenom`, `sexe`, `datenaiss`, `datedeces`, `lieudeces`
+        - Format attendu: séparateur `;` avec colonnes INSEE standard:
+          `nomprenom`, `sexe`, `datenaiss`, `lieunaiss`, `commnaiss`, `paysnaiss`, `datedeces`, `lieudeces`, `actedeces`
         - Les doublons sont automatiquement détectés et ignorés
         """)
 
@@ -244,26 +245,71 @@ def render_import_tab():
         )
 
         if uploaded_files:
-            if st.button("🚀 Lancer l'import", type="primary"):
-                progress_bar = st.progress(0)
-                status_text = st.empty()
+            # Afficher les fichiers sélectionnés
+            st.info(f"📁 {len(uploaded_files)} fichier(s) sélectionné(s)")
+
+            if st.button("🚀 Lancer l'import", type="primary", use_container_width=True):
+                # Conteneur pour la progression
+                progress_container = st.container()
+
+                with progress_container:
+                    st.markdown("---")
+                    st.markdown("### ⏳ Import en cours...")
+
+                    # Barre de progression globale
+                    progress_bar = st.progress(0)
+
+                    # Affichage du statut détaillé
+                    col_status1, col_status2, col_status3 = st.columns(3)
+                    with col_status1:
+                        progress_percent = st.empty()
+                        progress_percent.metric("Progression", "0%")
+                    with col_status2:
+                        current_file_display = st.empty()
+                        current_file_display.metric("Fichier", "-")
+                    with col_status3:
+                        rows_counter = st.empty()
+                        rows_counter.metric("Lignes traitées", "0")
+
+                    # Texte de statut détaillé
+                    status_text = st.empty()
+                    status_text.info("🔄 Initialisation...")
 
                 total_added = 0
                 total_duplicates = 0
+                total_rows_processed = 0
                 results = []
 
                 for i, file in enumerate(uploaded_files):
-                    status_text.text(f"Traitement de {file.name}...")
+                    file_progress = i / len(uploaded_files)
+
+                    # Mise à jour affichage
+                    current_file_display.metric("Fichier", f"{i+1}/{len(uploaded_files)}")
+                    status_text.info(f"🔄 Traitement de **{file.name}**...")
 
                     content = file.read()
+
+                    # Callback pour la progression intra-fichier
+                    def update_progress(p, rows=0):
+                        nonlocal total_rows_processed
+                        overall = (i + p) / len(uploaded_files)
+                        progress_bar.progress(overall)
+                        percent = int(overall * 100)
+                        progress_percent.metric("Progression", f"{percent}%")
+                        if rows > 0:
+                            total_rows_processed = rows
+                            rows_counter.metric("Lignes traitées", f"{total_rows_processed:,}".replace(",", " "))
+
                     added, dups, message = etl_utils.import_csv_batch(
                         content,
                         file.name,
-                        lambda p: progress_bar.progress((i + p) / len(uploaded_files))
+                        update_progress
                     )
 
                     total_added += added
                     total_duplicates += dups
+                    total_rows_processed += added + dups
+
                     results.append({
                         'Fichier': file.name,
                         'Lignes ajoutées': added,
@@ -271,14 +317,28 @@ def render_import_tab():
                         'Statut': '✅' if 'réussi' in message.lower() else '❌'
                     })
 
+                    # Mise à jour après chaque fichier
                     progress_bar.progress((i + 1) / len(uploaded_files))
+                    progress_percent.metric("Progression", f"{int((i + 1) / len(uploaded_files) * 100)}%")
+                    rows_counter.metric("Lignes traitées", f"{total_rows_processed:,}".replace(",", " "))
 
+                # Finalisation
+                progress_bar.progress(1.0)
+                progress_percent.metric("Progression", "100%")
                 status_text.empty()
-                progress_bar.empty()
 
-                # Display results
-                st.success(f"Import terminé: **{total_added:,}** lignes ajoutées, **{total_duplicates:,}** doublons ignorés")
+                # Message de succès
+                st.markdown("---")
+                st.success(f"""
+                ### ✅ Import terminé!
 
+                - **{total_added:,}** lignes ajoutées
+                - **{total_duplicates:,}** doublons ignorés
+                - **{len(uploaded_files)}** fichier(s) traité(s)
+                """.replace(",", " "))
+
+                # Tableau des résultats
+                st.markdown("#### 📊 Détail par fichier")
                 st.dataframe(
                     pd.DataFrame(results),
                     use_container_width=True,

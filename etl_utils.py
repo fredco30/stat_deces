@@ -327,20 +327,31 @@ def import_csv_batch(file_content: bytes, filename: str, progress_callback=None)
         df.columns = [col.lower().strip().replace('"', '') for col in df.columns]
 
         # Process in batches
-        batch_size = 10000
+        batch_size = 5000  # Smaller batches for more frequent updates
         total_rows = len(df)
         rows_added = 0
         duplicates = 0
+        rows_processed = 0
+
+        # Initial callback
+        if progress_callback:
+            try:
+                progress_callback(0, 0)
+            except TypeError:
+                progress_callback(0)
 
         for i in range(0, total_rows, batch_size):
             batch = df.iloc[i:i+batch_size]
 
-            for _, row in batch.iterrows():
+            for idx, row in batch.iterrows():
+                rows_processed += 1
+
                 try:
                     datenaiss_iso = parse_date_insee(row.get('datenaiss', ''))
                     datedeces_iso = parse_date_insee(row.get('datedeces', ''))
 
                     if not datedeces_iso:
+                        duplicates += 1
                         continue
 
                     annee_deces = int(datedeces_iso[:4])
@@ -383,8 +394,14 @@ def import_csv_batch(file_content: bytes, filename: str, progress_callback=None)
                     duplicates += 1
                     continue
 
+            # Update progress after each batch with row count
             if progress_callback:
-                progress_callback(min(i + batch_size, total_rows) / total_rows)
+                progress_pct = min(rows_processed, total_rows) / total_rows
+                try:
+                    progress_callback(progress_pct, rows_processed)
+                except TypeError:
+                    # Fallback if callback doesn't accept rows parameter
+                    progress_callback(progress_pct)
 
         # Get count after import
         count_after = conn.execute("SELECT COUNT(*) FROM deces").fetchone()[0]

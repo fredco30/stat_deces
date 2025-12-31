@@ -2,6 +2,11 @@
 """
 Intelligent Launcher for French Mortality Data Application
 Detects IPs, displays access URLs, and launches Streamlit server.
+
+Usage:
+    python launcher.py              # Lance sur le port par défaut (8501)
+    python launcher.py --port 8080  # Lance sur le port 8080
+    python launcher.py -p 9000      # Lance sur le port 9000
 """
 
 import subprocess
@@ -10,11 +15,14 @@ import sys
 import os
 import time
 import webbrowser
+import argparse
 from pathlib import Path
 
 # Configuration
-PORT = 5173
+DEFAULT_PORT = 8501  # Port par défaut Streamlit (évite conflit avec 5173/5174)
+EXCLUDED_PORTS = [5173, 5174, 3000, 3001]  # Ports à éviter (souvent utilisés)
 APP_FILE = "app.py"
+CONFIG_FILE = Path(__file__).parent / ".port_config"
 
 
 def get_local_ip() -> str:
@@ -68,12 +76,81 @@ def check_port_available(port: int) -> bool:
         return False
 
 
-def find_available_port(start_port: int) -> int:
-    """Find an available port starting from start_port."""
+def find_available_port(start_port: int, excluded: list = None) -> int:
+    """Find an available port starting from start_port, avoiding excluded ports."""
+    if excluded is None:
+        excluded = EXCLUDED_PORTS
+
     port = start_port
-    while not check_port_available(port) and port < start_port + 100:
+    max_attempts = 100
+
+    for _ in range(max_attempts):
+        if port not in excluded and check_port_available(port):
+            return port
         port += 1
-    return port
+
+    # Si on n'a pas trouvé, chercher dans une autre plage
+    for port in range(8000, 9000):
+        if port not in excluded and check_port_available(port):
+            return port
+
+    return start_port  # Fallback
+
+
+def save_port_config(port: int):
+    """Save the last used port to config file."""
+    try:
+        with open(CONFIG_FILE, 'w') as f:
+            f.write(str(port))
+    except Exception:
+        pass
+
+
+def load_port_config() -> int:
+    """Load the last used port from config file."""
+    try:
+        if CONFIG_FILE.exists():
+            with open(CONFIG_FILE, 'r') as f:
+                return int(f.read().strip())
+    except Exception:
+        pass
+    return DEFAULT_PORT
+
+
+def parse_arguments():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Lanceur de l'application Mortalité France",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Exemples:
+  python launcher.py                 # Port par défaut (8501)
+  python launcher.py --port 8080     # Port personnalisé
+  python launcher.py -p 9000         # Port personnalisé (forme courte)
+  python launcher.py --no-browser    # Sans ouvrir le navigateur
+        """
+    )
+
+    parser.add_argument(
+        '-p', '--port',
+        type=int,
+        default=None,
+        help=f"Port du serveur (défaut: {DEFAULT_PORT})"
+    )
+
+    parser.add_argument(
+        '--no-browser',
+        action='store_true',
+        help="Ne pas ouvrir automatiquement le navigateur"
+    )
+
+    parser.add_argument(
+        '--last-port',
+        action='store_true',
+        help="Utiliser le dernier port utilisé"
+    )
+
+    return parser.parse_args()
 
 
 def print_banner():
@@ -199,6 +276,9 @@ def launch_streamlit(port: int, open_browser: bool = True):
 
 def main():
     """Main launcher entry point."""
+    # Parse command line arguments
+    args = parse_arguments()
+
     print_banner()
 
     # Check dependencies
@@ -215,18 +295,41 @@ def main():
     print(f"   IP locale: {local_ip}")
     print(f"   IP publique: {public_ip}")
 
-    # Find available port
-    port = PORT
-    if not check_port_available(port):
-        print(f"\n⚠️  Port {port} déjà utilisé, recherche d'un port disponible...")
-        port = find_available_port(port)
+    # Determine port to use
+    if args.port:
+        # Port spécifié en argument
+        requested_port = args.port
+        print(f"\n📌 Port demandé: {requested_port}")
+    elif args.last_port:
+        # Utiliser le dernier port
+        requested_port = load_port_config()
+        print(f"\n📌 Dernier port utilisé: {requested_port}")
+    else:
+        # Port par défaut
+        requested_port = DEFAULT_PORT
+
+    # Check if port is available
+    if requested_port in EXCLUDED_PORTS:
+        print(f"\n⚠️  Port {requested_port} est dans la liste des ports exclus (conflits connus)")
+        port = find_available_port(DEFAULT_PORT)
+        print(f"   Utilisation du port {port} à la place")
+    elif not check_port_available(requested_port):
+        print(f"\n⚠️  Port {requested_port} déjà utilisé, recherche d'un port disponible...")
+        port = find_available_port(requested_port)
         print(f"   Utilisation du port {port}")
+    else:
+        port = requested_port
+        print(f"\n✅ Port {port} disponible")
+
+    # Save port for next time
+    save_port_config(port)
 
     # Print access information
     print_access_info(local_ip, public_ip, port)
 
     # Launch server
-    launch_streamlit(port)
+    open_browser = not args.no_browser
+    launch_streamlit(port, open_browser)
 
 
 if __name__ == "__main__":
