@@ -632,6 +632,42 @@ def get_total_deaths(year: Optional[int] = None, month: Optional[int] = None,
     return result
 
 
+def get_deaths_by_year(month: Optional[int] = None,
+                       department: Optional[str] = None,
+                       sexe: Optional[int] = None) -> pd.DataFrame:
+    """
+    Get death counts grouped by year with optional filters.
+    Returns only years that have data matching the filters.
+
+    Returns:
+        DataFrame with columns: annee_deces, count
+    """
+    conn = get_connection()
+
+    query = """
+        SELECT annee_deces, COUNT(*) as count
+        FROM deces
+        WHERE annee_deces IS NOT NULL
+    """
+    params = []
+
+    if month:
+        query += " AND mois_deces = ?"
+        params.append(month)
+    if department:
+        query += " AND departement = ?"
+        params.append(department)
+    if sexe:
+        query += " AND sexe = ?"
+        params.append(sexe)
+
+    query += " GROUP BY annee_deces HAVING COUNT(*) > 0 ORDER BY annee_deces"
+
+    df = conn.execute(query, params).df()
+    conn.close()
+    return df
+
+
 def get_average_age(year: Optional[int] = None, month: Optional[int] = None,
                     department: Optional[str] = None, sexe: Optional[int] = None) -> Optional[float]:
     """Get average age at death with optional filters."""

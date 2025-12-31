@@ -418,51 +418,47 @@ def render_synthesis_tab(year, month, dept, sex):
     # Yearly breakdown chart (only years with data)
     st.markdown("#### 📅 Évolution par année")
 
-    available_years = etl_utils.get_available_years()
+    # Use single SQL query to get deaths grouped by year with filters applied
+    df_yearly = etl_utils.get_deaths_by_year(month, dept, sex)
 
-    if available_years:
-        # Collect data only for years with deaths
-        years_list = []
-        deaths_list = []
+    if not df_yearly.empty:
+        # Convert to lists for Plotly
+        years_list = [str(int(y)) for y in df_yearly['annee_deces'].tolist()]
+        deaths_list = df_yearly['count'].tolist()
 
-        for y in available_years:
-            count = etl_utils.get_total_deaths(y, month, dept, sex)
-            # Only include years with actual data
-            if count > 0:
-                years_list.append(str(y))
-                deaths_list.append(count)
+        # Use go.Bar for complete control over x-axis
+        fig = go.Figure()
 
-        if years_list:
-            # Use go.Bar for complete control over x-axis
-            fig = go.Figure()
-
-            fig.add_trace(go.Bar(
-                x=years_list,
-                y=deaths_list,
-                text=[f"{d:,}".replace(",", " ") for d in deaths_list],
-                textposition='outside',
-                marker=dict(
-                    color=deaths_list,
-                    colorscale='Blues',
-                    showscale=True,
-                    colorbar=dict(title="Décès")
-                )
-            ))
-
-            fig.update_layout(
-                xaxis_title="Année",
-                yaxis_title="Nombre de décès",
-                height=400,
-                showlegend=False,
-                xaxis=dict(
-                    type='category',  # Force categorical
-                    categoryorder='array',
-                    categoryarray=years_list
-                )
+        fig.add_trace(go.Bar(
+            x=years_list,
+            y=deaths_list,
+            text=[f"{d:,}".replace(",", " ") for d in deaths_list],
+            textposition='outside',
+            marker=dict(
+                color=deaths_list,
+                colorscale='Blues',
+                showscale=True,
+                colorbar=dict(title="Décès")
             )
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Aucune donnée disponible pour les filtres sélectionnés.")
+        ))
+
+        fig.update_layout(
+            xaxis_title="Année",
+            yaxis_title="Nombre de décès",
+            height=400,
+            showlegend=False,
+            xaxis=dict(
+                type='category',  # Force categorical
+                categoryorder='array',
+                categoryarray=years_list,
+                tickmode='array',
+                tickvals=years_list,
+                ticktext=years_list
+            )
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Aucune donnée disponible pour les filtres sélectionnés.")
 
     st.markdown("---")
 
