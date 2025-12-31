@@ -23,14 +23,61 @@ def get_connection() -> duckdb.DuckDBPyConnection:
     return duckdb.connect(str(DB_PATH))
 
 
+def reset_database() -> None:
+    """Reset the database by dropping all tables. Use with caution!"""
+    conn = get_connection()
+    try:
+        conn.execute("DROP TABLE IF EXISTS deces")
+        conn.execute("DROP TABLE IF EXISTS import_logs")
+        conn.execute("DROP SEQUENCE IF EXISTS import_logs_seq")
+    except Exception:
+        pass
+    conn.close()
+
+
+def check_and_migrate_database() -> bool:
+    """Check if database needs migration and perform it if necessary."""
+    conn = get_connection()
+    needs_reset = False
+
+    try:
+        # Try to check the table structure
+        result = conn.execute("SELECT * FROM deces LIMIT 0").description
+        column_names = [col[0] for col in result] if result else []
+
+        # Check if 'id' column exists (old structure)
+        if 'id' in column_names:
+            needs_reset = True
+
+        # Check if hash_unique is the primary key
+        if 'hash_unique' not in column_names:
+            needs_reset = True
+
+    except Exception:
+        # Table doesn't exist, that's fine
+        pass
+
+    conn.close()
+
+    if needs_reset:
+        print("Migration de la base de données nécessaire...")
+        reset_database()
+        return True
+
+    return False
+
+
 def init_database() -> None:
     """Initialize the database with required tables."""
+    # Check if migration is needed
+    check_and_migrate_database()
+
     conn = get_connection()
 
     # Main deaths table with unique constraint to prevent duplicates
+    # Note: In DuckDB, we don't need an explicit id column - hash_unique serves as unique identifier
     conn.execute("""
         CREATE TABLE IF NOT EXISTS deces (
-            id INTEGER PRIMARY KEY,
             nomprenom VARCHAR,
             sexe INTEGER,
             datenaiss DATE,
@@ -46,15 +93,18 @@ def init_database() -> None:
             jour_deces INTEGER,
             age_deces DOUBLE,
             departement VARCHAR,
-            -- Hash for deduplication
-            hash_unique VARCHAR UNIQUE
+            -- Hash for deduplication (serves as unique identifier)
+            hash_unique VARCHAR PRIMARY KEY
         )
     """)
 
     # Import tracking table
     conn.execute("""
+        CREATE SEQUENCE IF NOT EXISTS import_logs_seq START 1
+    """)
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS import_logs (
-            id INTEGER PRIMARY KEY,
+            id INTEGER DEFAULT nextval('import_logs_seq'),
             filename VARCHAR,
             import_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             rows_added INTEGER,
