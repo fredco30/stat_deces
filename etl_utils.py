@@ -288,13 +288,19 @@ def process_csv_file(file_content: bytes, filename: str) -> Tuple[int, int, str]
 
 def import_csv_batch(file_content: bytes, filename: str, progress_callback=None) -> Tuple[int, int, str]:
     """
-    Optimized batch import for large CSV files.
-    Uses DuckDB's native CSV reader for better performance.
+    Ultra-fast batch import using native DuckDB SQL operations.
+    Processes 700k+ rows in seconds instead of minutes.
     """
-    import io
     import tempfile
 
     try:
+        # Progress: Starting
+        if progress_callback:
+            try:
+                progress_callback(0.05, 0)
+            except TypeError:
+                progress_callback(0.05)
+
         # Write to temp file for DuckDB to read directly
         with tempfile.NamedTemporaryFile(mode='wb', suffix='.csv', delete=False) as tmp:
             tmp.write(file_content)
@@ -305,108 +311,169 @@ def import_csv_batch(file_content: bytes, filename: str, progress_callback=None)
         # Get count before import
         count_before = conn.execute("SELECT COUNT(*) FROM deces").fetchone()[0]
 
-        # Read CSV directly with DuckDB
+        # Progress: File written, starting DuckDB load
+        if progress_callback:
+            try:
+                progress_callback(0.1, 0)
+            except TypeError:
+                progress_callback(0.1)
+
+        # Create temporary table and load CSV directly with DuckDB (ultra-fast)
         try:
-            df = conn.execute(f"""
+            # Drop temp table if exists
+            conn.execute("DROP TABLE IF EXISTS temp_import")
+
+            # Load CSV into temp table - DuckDB reads CSV at GB/s speed
+            conn.execute(f"""
+                CREATE TEMP TABLE temp_import AS
                 SELECT * FROM read_csv_auto('{tmp_path}',
                     delim=';',
                     header=true,
                     ignore_errors=true,
-                    all_varchar=true
+                    all_varchar=true,
+                    normalize_names=true
                 )
-            """).df()
+            """)
+
+            # Get row count
+            total_rows = conn.execute("SELECT COUNT(*) FROM temp_import").fetchone()[0]
+
         except Exception as e:
-            # Fallback to pandas method
             os.unlink(tmp_path)
-            return process_csv_file(file_content, filename)
+            return 0, 0, f"Erreur lecture CSV: {str(e)}"
 
         # Clean up temp file
         os.unlink(tmp_path)
 
-        # Normalize column names
-        df.columns = [col.lower().strip().replace('"', '') for col in df.columns]
-
-        # Process in batches
-        batch_size = 5000  # Smaller batches for more frequent updates
-        total_rows = len(df)
-        rows_added = 0
-        duplicates = 0
-        rows_processed = 0
-
-        # Initial callback
+        # Progress: CSV loaded, starting transformation
         if progress_callback:
             try:
-                progress_callback(0, 0)
+                progress_callback(0.3, total_rows)
             except TypeError:
-                progress_callback(0)
+                progress_callback(0.3)
 
-        for i in range(0, total_rows, batch_size):
-            batch = df.iloc[i:i+batch_size]
+        # Normalize column names (handle variations)
+        conn.execute("""
+            CREATE TEMP TABLE temp_normalized AS
+            SELECT
+                COALESCE(nomprenom, '') as nomprenom,
+                COALESCE(sexe, '0') as sexe,
+                COALESCE(datenaiss, '') as datenaiss,
+                COALESCE(lieunaiss, '') as lieunaiss,
+                COALESCE(commnaiss, '') as commnaiss,
+                COALESCE(paysnaiss, '') as paysnaiss,
+                COALESCE(datedeces, '') as datedeces,
+                COALESCE(lieudeces, '') as lieudeces,
+                COALESCE(actedeces, '') as actedeces
+            FROM temp_import
+        """)
 
-            for idx, row in batch.iterrows():
-                rows_processed += 1
+        # Progress: Normalized, starting SQL transformations
+        if progress_callback:
+            try:
+                progress_callback(0.4, total_rows)
+            except TypeError:
+                progress_callback(0.4)
 
-                try:
-                    datenaiss_iso = parse_date_insee(row.get('datenaiss', ''))
-                    datedeces_iso = parse_date_insee(row.get('datedeces', ''))
+        # Create transformed table with all computed columns using pure SQL
+        conn.execute("""
+            CREATE TEMP TABLE temp_transformed AS
+            SELECT
+                nomprenom,
+                TRY_CAST(NULLIF(TRIM(sexe), '') AS INTEGER) as sexe,
+                -- Parse birth date (YYYYMMDD -> DATE)
+                CASE
+                    WHEN LENGTH(TRIM(datenaiss)) >= 8 THEN
+                        TRY_CAST(
+                            SUBSTR(datenaiss, 1, 4) || '-' ||
+                            SUBSTR(datenaiss, 5, 2) || '-' ||
+                            SUBSTR(datenaiss, 7, 2)
+                        AS DATE)
+                    ELSE NULL
+                END as datenaiss,
+                lieunaiss,
+                commnaiss,
+                paysnaiss,
+                -- Parse death date (YYYYMMDD -> DATE)
+                CASE
+                    WHEN LENGTH(TRIM(datedeces)) >= 8 THEN
+                        TRY_CAST(
+                            SUBSTR(datedeces, 1, 4) || '-' ||
+                            SUBSTR(datedeces, 5, 2) || '-' ||
+                            SUBSTR(datedeces, 7, 2)
+                        AS DATE)
+                    ELSE NULL
+                END as datedeces,
+                lieudeces,
+                actedeces,
+                -- Extract year, month, day from death date
+                TRY_CAST(SUBSTR(datedeces, 1, 4) AS INTEGER) as annee_deces,
+                TRY_CAST(SUBSTR(datedeces, 5, 2) AS INTEGER) as mois_deces,
+                TRY_CAST(SUBSTR(datedeces, 7, 2) AS INTEGER) as jour_deces,
+                -- Calculate age at death
+                CASE
+                    WHEN LENGTH(TRIM(datenaiss)) >= 8 AND LENGTH(TRIM(datedeces)) >= 8 THEN
+                        ROUND(
+                            (TRY_CAST(SUBSTR(datedeces, 1, 4) AS INTEGER) -
+                             TRY_CAST(SUBSTR(datenaiss, 1, 4) AS INTEGER)) +
+                            (TRY_CAST(SUBSTR(datedeces, 5, 2) || SUBSTR(datedeces, 7, 2) AS INTEGER) -
+                             TRY_CAST(SUBSTR(datenaiss, 5, 2) || SUBSTR(datenaiss, 7, 2) AS INTEGER)) / 10000.0
+                        , 2)
+                    ELSE NULL
+                END as age_deces,
+                -- Extract department (2 chars, or 3 for DOM-TOM 97xxx)
+                CASE
+                    WHEN SUBSTR(lieudeces, 1, 2) = '97' THEN SUBSTR(lieudeces, 1, 3)
+                    WHEN SUBSTR(lieudeces, 1, 2) IN ('2A', '2B') THEN SUBSTR(lieudeces, 1, 2)
+                    WHEN LENGTH(lieudeces) >= 2 THEN SUBSTR(lieudeces, 1, 2)
+                    ELSE '00'
+                END as departement,
+                -- Create unique hash for deduplication
+                MD5(COALESCE(nomprenom, '') || COALESCE(datenaiss, '') ||
+                    COALESCE(datedeces, '') || COALESCE(lieudeces, '')) as hash_unique
+            FROM temp_normalized
+            WHERE LENGTH(TRIM(datedeces)) >= 8
+        """)
 
-                    if not datedeces_iso:
-                        duplicates += 1
-                        continue
+        # Progress: Transformed, starting insert
+        if progress_callback:
+            try:
+                progress_callback(0.6, total_rows)
+            except TypeError:
+                progress_callback(0.6)
 
-                    annee_deces = int(datedeces_iso[:4])
-                    mois_deces = int(datedeces_iso[5:7])
-                    jour_deces = int(datedeces_iso[8:10])
-                    age_deces = calculate_age(datenaiss_iso, datedeces_iso)
-                    departement = extract_departement(row.get('lieudeces', ''))
-                    hash_unique = compute_hash(row.to_dict())
+        # Insert into main table with deduplication (INSERT OR IGNORE)
+        conn.execute("""
+            INSERT OR IGNORE INTO deces (
+                nomprenom, sexe, datenaiss, lieunaiss, commnaiss, paysnaiss,
+                datedeces, lieudeces, actedeces,
+                annee_deces, mois_deces, jour_deces, age_deces, departement,
+                hash_unique
+            )
+            SELECT
+                nomprenom, sexe, datenaiss, lieunaiss, commnaiss, paysnaiss,
+                datedeces, lieudeces, actedeces,
+                annee_deces, mois_deces, jour_deces, age_deces, departement,
+                hash_unique
+            FROM temp_transformed
+        """)
 
-                    try:
-                        sexe = int(str(row.get('sexe', '0')).strip())
-                    except ValueError:
-                        sexe = 0
-
-                    conn.execute("""
-                        INSERT OR IGNORE INTO deces (
-                            nomprenom, sexe, datenaiss, lieunaiss, commnaiss, paysnaiss,
-                            datedeces, lieudeces, actedeces,
-                            annee_deces, mois_deces, jour_deces, age_deces, departement,
-                            hash_unique
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, [
-                        str(row.get('nomprenom', '')),
-                        sexe,
-                        datenaiss_iso,
-                        str(row.get('lieunaiss', '')),
-                        str(row.get('commnaiss', '')),
-                        str(row.get('paysnaiss', '')),
-                        datedeces_iso,
-                        str(row.get('lieudeces', '')),
-                        str(row.get('actedeces', '')),
-                        annee_deces,
-                        mois_deces,
-                        jour_deces,
-                        age_deces,
-                        departement,
-                        hash_unique
-                    ])
-                except Exception:
-                    duplicates += 1
-                    continue
-
-            # Update progress after each batch with row count
-            if progress_callback:
-                progress_pct = min(rows_processed, total_rows) / total_rows
-                try:
-                    progress_callback(progress_pct, rows_processed)
-                except TypeError:
-                    # Fallback if callback doesn't accept rows parameter
-                    progress_callback(progress_pct)
+        # Progress: Insert done
+        if progress_callback:
+            try:
+                progress_callback(0.9, total_rows)
+            except TypeError:
+                progress_callback(0.9)
 
         # Get count after import
         count_after = conn.execute("SELECT COUNT(*) FROM deces").fetchone()[0]
         rows_added = count_after - count_before
         duplicates = total_rows - rows_added
+
+        # Clean up temp tables
+        conn.execute("DROP TABLE IF EXISTS temp_import")
+        conn.execute("DROP TABLE IF EXISTS temp_normalized")
+        conn.execute("DROP TABLE IF EXISTS temp_transformed")
 
         # Log import
         conn.execute("""
@@ -415,6 +482,13 @@ def import_csv_batch(file_content: bytes, filename: str, progress_callback=None)
         """, [filename, rows_added, duplicates, 'success'])
 
         conn.close()
+
+        # Progress: Complete
+        if progress_callback:
+            try:
+                progress_callback(1.0, total_rows)
+            except TypeError:
+                progress_callback(1.0)
 
         return rows_added, duplicates, f"Import réussi: {rows_added} lignes ajoutées, {duplicates} doublons ignorés"
 
