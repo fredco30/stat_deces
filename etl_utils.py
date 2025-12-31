@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Tuple, Optional, List
 import hashlib
 import requests
+import time
+from contextlib import contextmanager
 
 
 # Database configuration
@@ -23,9 +25,55 @@ POPULATION_AGE_PATH = Path(__file__).parent / "population_age.csv"
 POPULATION_COMPLETE_PATH = Path(__file__).parent / "population_complete.csv"
 
 
-def get_connection() -> duckdb.DuckDBPyConnection:
-    """Get a DuckDB connection."""
-    return duckdb.connect(str(DB_PATH))
+def get_connection(read_only: bool = False, max_retries: int = 3) -> duckdb.DuckDBPyConnection:
+    """
+    Get a DuckDB connection with retry logic.
+
+    Args:
+        read_only: If True, open in read-only mode (allows concurrent access)
+        max_retries: Maximum number of retry attempts
+
+    Returns:
+        DuckDB connection
+    """
+    for attempt in range(max_retries):
+        try:
+            if read_only:
+                # Read-only mode allows multiple concurrent connections
+                return duckdb.connect(str(DB_PATH), read_only=True)
+            else:
+                # Normal read-write mode
+                return duckdb.connect(str(DB_PATH))
+        except Exception as e:
+            if attempt < max_retries - 1:
+                # Exponential backoff: wait 0.1s, 0.2s, 0.4s
+                wait_time = 0.1 * (2 ** attempt)
+                time.sleep(wait_time)
+            else:
+                # Last attempt failed, raise the exception
+                raise
+
+
+@contextmanager
+def db_connection(read_only: bool = False):
+    """
+    Context manager for DuckDB connections.
+    Ensures connections are properly closed even if an error occurs.
+
+    Usage:
+        with db_connection() as conn:
+            result = conn.execute("SELECT ...").fetchall()
+    """
+    conn = None
+    try:
+        conn = get_connection(read_only=read_only)
+        yield conn
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass  # Ignore errors during close
 
 
 def reset_database() -> None:
@@ -587,80 +635,74 @@ def import_csv_batch(file_content: bytes, filename: str, progress_callback=None)
 
 def get_available_years() -> List[int]:
     """Get list of years with data."""
-    conn = get_connection()
-    result = conn.execute("""
-        SELECT DISTINCT annee_deces
-        FROM deces
-        WHERE annee_deces IS NOT NULL
-        ORDER BY annee_deces DESC
-    """).fetchall()
-    conn.close()
-    return [r[0] for r in result]
+    with db_connection(read_only=True) as conn:
+        result = conn.execute("""
+            SELECT DISTINCT annee_deces
+            FROM deces
+            WHERE annee_deces IS NOT NULL
+            ORDER BY annee_deces DESC
+        """).fetchall()
+        return [r[0] for r in result]
 
 
 def get_available_departments() -> List[str]:
     """Get list of departments with data."""
-    conn = get_connection()
-    result = conn.execute("""
-        SELECT DISTINCT departement
-        FROM deces
-        WHERE departement IS NOT NULL AND departement != '00'
-        ORDER BY departement
-    """).fetchall()
-    conn.close()
-    return [r[0] for r in result]
+    with db_connection(read_only=True) as conn:
+        result = conn.execute("""
+            SELECT DISTINCT departement
+            FROM deces
+            WHERE departement IS NOT NULL AND departement != '00'
+            ORDER BY departement
+        """).fetchall()
+        return [r[0] for r in result]
 
 
 def get_total_deaths(year: Optional[int] = None, month: Optional[int] = None,
                      department: Optional[str] = None, sexe: Optional[int] = None) -> int:
     """Get total death count with optional filters."""
-    conn = get_connection()
+    with db_connection(read_only=True) as conn:
+        query = "SELECT COUNT(*) FROM deces WHERE 1=1"
+        params = []
 
-    query = "SELECT COUNT(*) FROM deces WHERE 1=1"
-    params = []
+        if year:
+            query += " AND annee_deces = ?"
+            params.append(year)
+        if month:
+            query += " AND mois_deces = ?"
+            params.append(month)
+        if department:
+            query += " AND departement = ?"
+            params.append(department)
+        if sexe:
+            query += " AND sexe = ?"
+            params.append(sexe)
 
-    if year:
-        query += " AND annee_deces = ?"
-        params.append(year)
-    if month:
-        query += " AND mois_deces = ?"
-        params.append(month)
-    if department:
-        query += " AND departement = ?"
-        params.append(department)
-    if sexe:
-        query += " AND sexe = ?"
-        params.append(sexe)
-
-    result = conn.execute(query, params).fetchone()[0]
-    conn.close()
-    return result
+        result = conn.execute(query, params).fetchone()[0]
+        return result
 
 
 def get_average_age(year: Optional[int] = None, month: Optional[int] = None,
                     department: Optional[str] = None, sexe: Optional[int] = None) -> Optional[float]:
     """Get average age at death with optional filters."""
-    conn = get_connection()
+    with db_connection(read_only=True) as conn:
+        query = "SELECT AVG(age_deces) FROM deces WHERE age_deces IS NOT NULL"
+        params = []
 
-    query = "SELECT AVG(age_deces) FROM deces WHERE age_deces IS NOT NULL"
-    params = []
+        if year:
+            query += " AND annee_deces = ?"
+            params.append(year)
+        if month:
+            query += " AND mois_deces = ?"
+            params.append(month)
+        if department:
+            query += " AND departement = ?"
+            params.append(department)
+        if sexe:
+            query += " AND sexe = ?"
+            params.append(sexe)
 
-    if year:
-        query += " AND annee_deces = ?"
-        params.append(year)
-    if month:
-        query += " AND mois_deces = ?"
-        params.append(month)
-    if department:
-        query += " AND departement = ?"
-        params.append(department)
-    if sexe:
-        query += " AND sexe = ?"
-        params.append(sexe)
-
-    result = conn.execute(query, params).fetchone()[0]
-    conn.close()
-    return round(result, 1) if result else None
+        result = conn.execute(query, params).fetchone()[0]
+        return round(result, 1) if result else None
 
 
 def get_yoy_evolution(year: int, month: Optional[int] = None,
@@ -677,177 +719,177 @@ def get_yoy_evolution(year: int, month: Optional[int] = None,
 def get_daily_deaths(year: int, month: Optional[int] = None,
                      department: Optional[str] = None, sexe: Optional[int] = None) -> pd.DataFrame:
     """Get daily death counts for time series."""
-    conn = get_connection()
+    with db_connection(read_only=True) as conn:
 
-    query = """
-        SELECT datedeces, COUNT(*) as count
-        FROM deces
-        WHERE annee_deces = ?
-    """
-    params = [year]
+        query = """
+            SELECT datedeces, COUNT(*) as count
+            FROM deces
+            WHERE annee_deces = ?
+        """
+        params = [year]
 
-    if month:
-        query += " AND mois_deces = ?"
-        params.append(month)
-    if department:
-        query += " AND departement = ?"
-        params.append(department)
-    if sexe:
-        query += " AND sexe = ?"
-        params.append(sexe)
+        if month:
+            query += " AND mois_deces = ?"
+            params.append(month)
+        if department:
+            query += " AND departement = ?"
+            params.append(department)
+        if sexe:
+            query += " AND sexe = ?"
+            params.append(sexe)
 
-    query += " GROUP BY datedeces ORDER BY datedeces"
+        query += " GROUP BY datedeces ORDER BY datedeces"
 
-    df = conn.execute(query, params).df()
-    conn.close()
+        df = conn.execute(query, params).df()
+        
     return df
 
 
 def get_deaths_by_month_day(year: int, department: Optional[str] = None,
                             sexe: Optional[int] = None) -> pd.DataFrame:
     """Get death counts grouped by month and day for heatmap."""
-    conn = get_connection()
+    with db_connection(read_only=True) as conn:
 
-    query = """
-        SELECT mois_deces as month, jour_deces as day, COUNT(*) as count
-        FROM deces
-        WHERE annee_deces = ?
-    """
-    params = [year]
+        query = """
+            SELECT mois_deces as month, jour_deces as day, COUNT(*) as count
+            FROM deces
+            WHERE annee_deces = ?
+        """
+        params = [year]
 
-    if department:
-        query += " AND departement = ?"
-        params.append(department)
-    if sexe:
-        query += " AND sexe = ?"
-        params.append(sexe)
+        if department:
+            query += " AND departement = ?"
+            params.append(department)
+        if sexe:
+            query += " AND sexe = ?"
+            params.append(sexe)
 
-    query += " GROUP BY mois_deces, jour_deces ORDER BY mois_deces, jour_deces"
+        query += " GROUP BY mois_deces, jour_deces ORDER BY mois_deces, jour_deces"
 
-    df = conn.execute(query, params).df()
-    conn.close()
+        df = conn.execute(query, params).df()
+        
     return df
 
 
 def get_age_pyramid_data(year: Optional[int] = None, month: Optional[int] = None,
                          department: Optional[str] = None) -> pd.DataFrame:
     """Get age distribution by sex for pyramid chart."""
-    conn = get_connection()
+    with db_connection(read_only=True) as conn:
 
-    query = """
-        SELECT
-            CAST(FLOOR(age_deces / 5) * 5 AS INTEGER) as age_group,
-            sexe,
-            COUNT(*) as count
-        FROM deces
-        WHERE age_deces IS NOT NULL AND sexe IN (1, 2)
-    """
-    params = []
+        query = """
+            SELECT
+                CAST(FLOOR(age_deces / 5) * 5 AS INTEGER) as age_group,
+                sexe,
+                COUNT(*) as count
+            FROM deces
+            WHERE age_deces IS NOT NULL AND sexe IN (1, 2)
+        """
+        params = []
 
-    if year:
-        query += " AND annee_deces = ?"
-        params.append(year)
-    if month:
-        query += " AND mois_deces = ?"
-        params.append(month)
-    if department:
-        query += " AND departement = ?"
-        params.append(department)
+        if year:
+            query += " AND annee_deces = ?"
+            params.append(year)
+        if month:
+            query += " AND mois_deces = ?"
+            params.append(month)
+        if department:
+            query += " AND departement = ?"
+            params.append(department)
 
-    query += " GROUP BY age_group, sexe ORDER BY age_group"
+        query += " GROUP BY age_group, sexe ORDER BY age_group"
 
-    df = conn.execute(query, params).df()
-    conn.close()
+        df = conn.execute(query, params).df()
+        
     return df
 
 
 def get_deaths_by_year(month: Optional[int] = None, department: Optional[str] = None,
                        sexe: Optional[int] = None) -> pd.DataFrame:
     """Get death counts by year for time series."""
-    conn = get_connection()
+    with db_connection(read_only=True) as conn:
 
-    query = """
-        SELECT annee_deces, COUNT(*) as count
-        FROM deces
-        WHERE annee_deces IS NOT NULL
-    """
-    params = []
+        query = """
+            SELECT annee_deces, COUNT(*) as count
+            FROM deces
+            WHERE annee_deces IS NOT NULL
+        """
+        params = []
 
-    if month:
-        query += " AND mois_deces = ?"
-        params.append(month)
-    if department:
-        query += " AND departement = ?"
-        params.append(department)
-    if sexe:
-        query += " AND sexe = ?"
-        params.append(sexe)
+        if month:
+            query += " AND mois_deces = ?"
+            params.append(month)
+        if department:
+            query += " AND departement = ?"
+            params.append(department)
+        if sexe:
+            query += " AND sexe = ?"
+            params.append(sexe)
 
-    query += " GROUP BY annee_deces ORDER BY annee_deces"
+        query += " GROUP BY annee_deces ORDER BY annee_deces"
 
-    df = conn.execute(query, params).df()
-    conn.close()
+        df = conn.execute(query, params).df()
+        
     return df
 
 
 def get_deaths_by_department(year: Optional[int] = None, month: Optional[int] = None,
                              sexe: Optional[int] = None) -> pd.DataFrame:
     """Get death counts by department for map."""
-    conn = get_connection()
+    with db_connection(read_only=True) as conn:
 
-    query = """
-        SELECT departement as code, COUNT(*) as count
-        FROM deces
-        WHERE departement IS NOT NULL AND departement != '00'
-    """
-    params = []
+        query = """
+            SELECT departement as code, COUNT(*) as count
+            FROM deces
+            WHERE departement IS NOT NULL AND departement != '00'
+        """
+        params = []
 
-    if year:
-        query += " AND annee_deces = ?"
-        params.append(year)
-    if month:
-        query += " AND mois_deces = ?"
-        params.append(month)
-    if sexe:
-        query += " AND sexe = ?"
-        params.append(sexe)
+        if year:
+            query += " AND annee_deces = ?"
+            params.append(year)
+        if month:
+            query += " AND mois_deces = ?"
+            params.append(month)
+        if sexe:
+            query += " AND sexe = ?"
+            params.append(sexe)
 
-    query += " GROUP BY departement ORDER BY departement"
+        query += " GROUP BY departement ORDER BY departement"
 
-    df = conn.execute(query, params).df()
-    conn.close()
+        df = conn.execute(query, params).df()
+        
     return df
 
 
 def get_database_stats() -> dict:
     """Get database statistics."""
-    conn = get_connection()
+    with db_connection(read_only=True) as conn:
 
-    stats = {
-        'total_records': conn.execute("SELECT COUNT(*) FROM deces").fetchone()[0],
-        'date_range': conn.execute("""
-            SELECT MIN(datedeces), MAX(datedeces) FROM deces
-        """).fetchone(),
-        'departments_count': conn.execute("""
-            SELECT COUNT(DISTINCT departement) FROM deces WHERE departement != '00'
-        """).fetchone()[0],
-        'imports_count': conn.execute("SELECT COUNT(*) FROM import_logs").fetchone()[0]
-    }
+        stats = {
+            'total_records': conn.execute("SELECT COUNT(*) FROM deces").fetchone()[0],
+            'date_range': conn.execute("""
+                SELECT MIN(datedeces), MAX(datedeces) FROM deces
+            """).fetchone(),
+            'departments_count': conn.execute("""
+                SELECT COUNT(DISTINCT departement) FROM deces WHERE departement != '00'
+            """).fetchone()[0],
+            'imports_count': conn.execute("SELECT COUNT(*) FROM import_logs").fetchone()[0]
+        }
 
-    conn.close()
+        
     return stats
 
 
 def get_import_history() -> pd.DataFrame:
     """Get import history log."""
-    conn = get_connection()
-    df = conn.execute("""
-        SELECT filename, import_date, rows_added, rows_duplicates, status
-        FROM import_logs
-        ORDER BY import_date DESC
-        LIMIT 50
-    """).df()
-    conn.close()
+    with db_connection(read_only=True) as conn:
+        df = conn.execute("""
+            SELECT filename, import_date, rows_added, rows_duplicates, status
+            FROM import_logs
+            ORDER BY import_date DESC
+            LIMIT 50
+        """).df()
+        
     return df
 
 
@@ -1061,39 +1103,39 @@ def get_mortality_by_age_year(age_group_size: int = 5, year_filter: Optional[Lis
     Returns:
         DataFrame with columns: age_group, annee, deaths, population, rate
     """
-    conn = get_connection()
+    with db_connection(read_only=True) as conn:
 
-    query = f"""
-        SELECT
-            CAST(FLOOR(age_deces / {age_group_size}) * {age_group_size} AS INTEGER) as age_group,
-            annee_deces,
-            COUNT(*) as deaths
-        FROM deces
-        WHERE age_deces IS NOT NULL
-    """
-    params = []
+        query = f"""
+            SELECT
+                CAST(FLOOR(age_deces / {age_group_size}) * {age_group_size} AS INTEGER) as age_group,
+                annee_deces,
+                COUNT(*) as deaths
+            FROM deces
+            WHERE age_deces IS NOT NULL
+        """
+        params = []
 
-    if year_filter:
-        placeholders = ','.join(['?'] * len(year_filter))
-        query += f" AND annee_deces IN ({placeholders})"
-        params.extend(year_filter)
+        if year_filter:
+            placeholders = ','.join(['?'] * len(year_filter))
+            query += f" AND annee_deces IN ({placeholders})"
+            params.extend(year_filter)
 
-    if month:
-        query += " AND mois_deces = ?"
-        params.append(month)
+        if month:
+            query += " AND mois_deces = ?"
+            params.append(month)
 
-    if dept:
-        query += " AND departement = ?"
-        params.append(dept)
+        if dept:
+            query += " AND departement = ?"
+            params.append(dept)
 
-    if sexe:
-        query += " AND sexe = ?"
-        params.append(sexe)
+        if sexe:
+            query += " AND sexe = ?"
+            params.append(sexe)
 
-    query += " GROUP BY age_group, annee_deces ORDER BY age_group, annee_deces"
+        query += " GROUP BY age_group, annee_deces ORDER BY age_group, annee_deces"
 
-    df = conn.execute(query, params).df()
-    conn.close()
+        df = conn.execute(query, params).df()
+        
 
     if df.empty:
         return df
@@ -1188,27 +1230,27 @@ def get_age_trends_summary(years: List[int], age_group_size: int = 5) -> pd.Data
 
 def get_median_age_by_year(years: Optional[List[int]] = None) -> pd.DataFrame:
     """Get median age of death by year."""
-    conn = get_connection()
+    with db_connection(read_only=True) as conn:
 
-    query = """
-        SELECT
-            annee_deces as annee,
-            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY age_deces) as median_age,
-            COUNT(*) as total_deaths
-        FROM deces
-        WHERE age_deces IS NOT NULL
-    """
-    params = []
+        query = """
+            SELECT
+                annee_deces as annee,
+                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY age_deces) as median_age,
+                COUNT(*) as total_deaths
+            FROM deces
+            WHERE age_deces IS NOT NULL
+        """
+        params = []
 
-    if years:
-        placeholders = ','.join(['?'] * len(years))
-        query += f" AND annee_deces IN ({placeholders})"
-        params.extend(years)
+        if years:
+            placeholders = ','.join(['?'] * len(years))
+            query += f" AND annee_deces IN ({placeholders})"
+            params.extend(years)
 
-    query += " GROUP BY annee_deces ORDER BY annee_deces"
+        query += " GROUP BY annee_deces ORDER BY annee_deces"
 
-    df = conn.execute(query, params).df()
-    conn.close()
+        df = conn.execute(query, params).df()
+        
 
     return df
 
