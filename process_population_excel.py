@@ -7,14 +7,22 @@ import pandas as pd
 import sys
 import os
 
+# Fix encoding for Windows console
+if sys.platform == 'win32':
+    import codecs
+    sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
+    sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
+
 def main():
     excel_file = 'population_francaise.xlsx'
 
     if not os.path.exists(excel_file):
-        print(f"❌ Fichier {excel_file} non trouvé !")
+        print(f"[ERREUR] Fichier {excel_file} non trouve !")
+        print(f"Repertoire actuel: {os.getcwd()}")
+        print(f"Fichiers presents: {os.listdir('.')[:10]}")
         sys.exit(1)
 
-    print("📊 Lecture du fichier Excel de population INSEE...")
+    print("Lecture du fichier Excel de population INSEE...")
 
     try:
         # Lire toutes les feuilles
