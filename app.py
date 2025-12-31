@@ -415,7 +415,7 @@ def render_synthesis_tab(year, month, dept, sex):
 
     st.markdown("---")
 
-    # Yearly breakdown chart (all available years)
+    # Yearly breakdown chart (only years with data)
     st.markdown("#### 📅 Évolution par année")
 
     available_years = etl_utils.get_available_years()
@@ -424,34 +424,37 @@ def render_synthesis_tab(year, month, dept, sex):
         yearly_data = []
         for y in available_years:
             count = etl_utils.get_total_deaths(y, month, dept, sex)
-            yearly_data.append({'Année': y, 'Décès': count})
+            # Only include years with actual data
+            if count > 0:
+                yearly_data.append({'Année': y, 'Décès': count})
 
-        df_yearly = pd.DataFrame(yearly_data)
+        if yearly_data:
+            df_yearly = pd.DataFrame(yearly_data)
 
-        fig = px.bar(
-            df_yearly,
-            x='Année',
-            y='Décès',
-            color='Décès',
-            color_continuous_scale='Blues',
-            text='Décès'
-        )
-        fig.update_traces(
-            texttemplate='%{text:,}'.replace(',', ' '),
-            textposition='outside'
-        )
-        fig.update_layout(
-            showlegend=False,
-            xaxis_title="Année",
-            yaxis_title="Nombre de décès",
-            height=400,
-            xaxis=dict(
-                tickmode='linear',
-                tick0=min(available_years),
-                dtick=1
+            fig = px.bar(
+                df_yearly,
+                x='Année',
+                y='Décès',
+                color='Décès',
+                color_continuous_scale='Blues',
+                text='Décès'
             )
-        )
-        st.plotly_chart(fig, use_container_width=True)
+            fig.update_traces(
+                texttemplate='%{text:,}'.replace(',', ' '),
+                textposition='outside'
+            )
+            fig.update_layout(
+                showlegend=False,
+                xaxis_title="Année",
+                yaxis_title="Nombre de décès",
+                height=400,
+                xaxis=dict(
+                    type='category'  # Use category type for cleaner display
+                )
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Aucune donnée disponible pour les filtres sélectionnés.")
 
     st.markdown("---")
 
