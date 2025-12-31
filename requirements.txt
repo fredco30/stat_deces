@@ -1,0 +1,20 @@
+# French Mortality Data Application - Dependencies
+# Python 3.9+ required
+
+# Core Framework
+streamlit>=1.28.0
+
+# Database
+duckdb>=0.9.0
+
+# Data Processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Visualization
+plotly>=5.18.0
+folium>=0.15.0
+streamlit-folium>=0.15.0
+
+# HTTP requests (for GeoJSON download and IP detection)
+requests>=2.31.0
