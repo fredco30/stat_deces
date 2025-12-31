@@ -767,7 +767,7 @@ def get_deaths_by_year(month: Optional[int] = None, department: Optional[str] = 
     conn = get_connection()
 
     query = """
-        SELECT annee_deces as year, COUNT(*) as count
+        SELECT annee_deces, COUNT(*) as count
         FROM deces
         WHERE annee_deces IS NOT NULL
     """
