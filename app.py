@@ -176,29 +176,6 @@ def render_sidebar():
         index=1 if years else 0
     )
 
-    # Comparison year filter (for analysis)
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### 📊 Comparaison")
-
-    # Build comparison year options (exclude selected year)
-    comparison_years = [y for y in years if y != selected_year] if selected_year else years
-
-    # Default to N-1 if available
-    default_comparison = None
-    if selected_year and (selected_year - 1) in comparison_years:
-        default_comparison = comparison_years.index(selected_year - 1)
-    elif comparison_years:
-        default_comparison = 0
-
-    selected_comparison_year = st.sidebar.selectbox(
-        "Comparer avec",
-        options=[None] + comparison_years,
-        format_func=lambda x: "Aucune" if x is None else str(x),
-        index=(default_comparison + 1) if default_comparison is not None else 0
-    )
-
-    st.sidebar.markdown("---")
-
     # Month filter
     months = {
         None: "Tous",
@@ -238,7 +215,7 @@ def render_sidebar():
     if stats['date_range'][0] and stats['date_range'][1]:
         st.sidebar.caption(f"Période: {stats['date_range'][0]} à {stats['date_range'][1]}")
 
-    return selected_year, selected_month, selected_dept, selected_sex, selected_comparison_year
+    return selected_year, selected_month, selected_dept, selected_sex
 
 
 # ============================================================================
@@ -386,7 +363,7 @@ def render_import_tab():
 # SYNTHESIS TAB (KPIs)
 # ============================================================================
 
-def render_synthesis_tab(year, month, dept, sex, comparison_year=None):
+def render_synthesis_tab(year, month, dept, sex):
     """Render the synthesis dashboard with KPIs."""
     st.markdown("### 📊 Tableau de bord - Synthèse")
 
@@ -414,24 +391,7 @@ def render_synthesis_tab(year, month, dept, sex, comparison_year=None):
         )
 
     with col3:
-        if year and comparison_year:
-            # Use selected comparison year
-            current = etl_utils.get_total_deaths(year, month, dept, sex)
-            previous = etl_utils.get_total_deaths(comparison_year, month, dept, sex)
-            if previous and previous > 0:
-                evolution = round(((current - previous) / previous) * 100, 1)
-                delta_str = f"{evolution:+.1f}%"
-            else:
-                evolution = None
-                delta_str = "N/A"
-            st.metric(
-                label=f"📈 Évolution vs {comparison_year}",
-                value=delta_str,
-                delta=f"{evolution:.1f}%" if evolution else None,
-                delta_color="inverse"
-            )
-        elif year:
-            # Fallback to N-1
+        if year:
             evolution = etl_utils.get_yoy_evolution(year, month, dept, sex)
             delta_str = f"{evolution:+.1f}%" if evolution else "N/A"
             st.metric(
@@ -455,12 +415,63 @@ def render_synthesis_tab(year, month, dept, sex, comparison_year=None):
 
     st.markdown("---")
 
+    # Yearly breakdown chart (only years with data)
+    st.markdown("#### 📅 Évolution par année")
+
+    available_years = etl_utils.get_available_years()
+
+    if available_years:
+        # Collect data only for years with deaths
+        years_list = []
+        deaths_list = []
+
+        for y in available_years:
+            count = etl_utils.get_total_deaths(y, month, dept, sex)
+            # Only include years with actual data
+            if count > 0:
+                years_list.append(str(y))
+                deaths_list.append(count)
+
+        if years_list:
+            # Use go.Bar for complete control over x-axis
+            fig = go.Figure()
+
+            fig.add_trace(go.Bar(
+                x=years_list,
+                y=deaths_list,
+                text=[f"{d:,}".replace(",", " ") for d in deaths_list],
+                textposition='outside',
+                marker=dict(
+                    color=deaths_list,
+                    colorscale='Blues',
+                    showscale=True,
+                    colorbar=dict(title="Décès")
+                )
+            ))
+
+            fig.update_layout(
+                xaxis_title="Année",
+                yaxis_title="Nombre de décès",
+                height=400,
+                showlegend=False,
+                xaxis=dict(
+                    type='category',  # Force categorical
+                    categoryorder='array',
+                    categoryarray=years_list
+                )
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Aucune donnée disponible pour les filtres sélectionnés.")
+
+    st.markdown("---")
+
     # Monthly breakdown chart
     if year:
         col1, col2 = st.columns(2)
 
         with col1:
-            st.markdown("#### Décès par mois")
+            st.markdown(f"#### Décès par mois ({year})")
             monthly_data = []
             for m in range(1, 13):
                 count = etl_utils.get_total_deaths(year, m, dept, sex)
@@ -509,112 +520,175 @@ def render_synthesis_tab(year, month, dept, sex, comparison_year=None):
 # VISUAL ANALYSIS TAB
 # ============================================================================
 
-def render_analysis_tab(year, month, dept, sex, comparison_year=None):
+def render_analysis_tab(year, month, dept, sex):
     """Render visual analysis dashboard."""
     st.markdown("### 📈 Analyse Visuelle")
 
-    if not year:
-        st.warning("Veuillez sélectionner une année dans les filtres.")
+    # Get available years for comparison
+    available_years = etl_utils.get_available_years()
+
+    if not available_years:
+        st.warning("Aucune donnée disponible.")
         return
 
-    # Check if data exists
-    total = etl_utils.get_total_deaths(year, month, dept, sex)
-    if total == 0:
-        st.warning("Aucune donnée disponible pour les filtres sélectionnés.")
+    # Multi-year selector
+    st.markdown("#### 🎯 Sélection des années à comparer")
+
+    col1, col2 = st.columns([3, 1])
+
+    with col1:
+        # Default selection: current year if available, otherwise the most recent
+        default_years = [year] if year and year in available_years else [available_years[0]]
+
+        selected_years = st.multiselect(
+            "Choisissez les années à comparer (plusieurs possibles)",
+            options=available_years,
+            default=default_years,
+            help="Sélectionnez une ou plusieurs années pour comparer les évolutions"
+        )
+
+    with col2:
+        # Quick select buttons
+        if st.button("📊 Toutes les années"):
+            selected_years = available_years
+            st.rerun()
+
+    if not selected_years:
+        st.warning("Veuillez sélectionner au moins une année.")
         return
 
-    # Determine comparison year (use selected or fallback to N-1)
-    compare_year = comparison_year if comparison_year else (year - 1)
+    # Palette de couleurs distinctes pour les courbes
+    color_palette = [
+        '#e74c3c',  # Rouge vif
+        '#3498db',  # Bleu
+        '#2ecc71',  # Vert
+        '#f39c12',  # Orange
+        '#9b59b6',  # Violet
+        '#1abc9c',  # Turquoise
+        '#e67e22',  # Orange foncé
+        '#34495e',  # Gris foncé
+        '#16a085',  # Cyan foncé
+        '#c0392b',  # Rouge foncé
+        '#27ae60',  # Vert foncé
+        '#2980b9',  # Bleu foncé
+        '#8e44ad',  # Violet foncé
+        '#d35400',  # Orange brûlé
+        '#c0392b',  # Bordeaux
+    ]
 
-    # Graph 1: Daily evolution comparison
-    st.markdown(f"#### 📉 Évolution journalière comparée ({year} vs {compare_year})")
-
-    df_current = etl_utils.get_daily_deaths(year, month, dept, sex)
-    df_previous = etl_utils.get_daily_deaths(compare_year, month, dept, sex)
+    # Graph 1: Daily evolution comparison (Multi-year)
+    st.markdown("#### 📉 Évolution journalière comparée")
 
     fig = go.Figure()
 
-    if not df_current.empty:
-        df_current['datedeces'] = pd.to_datetime(df_current['datedeces'])
-        df_current['day_of_year'] = df_current['datedeces'].dt.dayofyear
+    for idx, selected_year in enumerate(sorted(selected_years, reverse=True)):
+        df_year = etl_utils.get_daily_deaths(selected_year, month, dept, sex)
 
-        fig.add_trace(go.Scatter(
-            x=df_current['day_of_year'],
-            y=df_current['count'],
-            mode='lines',
-            name=str(year),
-            line=dict(color='#3498db', width=2)
-        ))
+        if not df_year.empty:
+            df_year['datedeces'] = pd.to_datetime(df_year['datedeces'])
+            df_year['day_of_year'] = df_year['datedeces'].dt.dayofyear
 
-    if not df_previous.empty:
-        df_previous['datedeces'] = pd.to_datetime(df_previous['datedeces'])
-        df_previous['day_of_year'] = df_previous['datedeces'].dt.dayofyear
+            # Utiliser une couleur de la palette
+            color = color_palette[idx % len(color_palette)]
 
-        fig.add_trace(go.Scatter(
-            x=df_previous['day_of_year'],
-            y=df_previous['count'],
-            mode='lines',
-            name=str(compare_year),
-            line=dict(color='#95a5a6', width=2, dash='dot')
-        ))
+            # L'année la plus récente est en trait plein et plus épais
+            is_most_recent = (selected_year == max(selected_years))
+            line_style = dict(
+                color=color,
+                width=5 if is_most_recent else 4,
+                dash='solid' if is_most_recent else 'solid'
+            )
+
+            fig.add_trace(go.Scatter(
+                x=df_year['day_of_year'],
+                y=df_year['count'],
+                mode='lines',
+                name=f"{selected_year}" + (" ⭐" if is_most_recent else ""),
+                line=line_style,
+                hovertemplate='<b>%{fullData.name}</b><br>Jour: %{x}<br>Décès: %{y}<extra></extra>'
+            ))
 
     fig.update_layout(
         xaxis_title="Jour de l'année",
         yaxis_title="Nombre de décès",
-        height=400,
+        height=500,
         hovermode='x unified',
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        legend=dict(
+            orientation="v",
+            yanchor="top",
+            y=0.99,
+            xanchor="right",
+            x=0.99,
+            bgcolor="rgba(255, 255, 255, 0.8)",
+            bordercolor="rgba(0, 0, 0, 0.2)",
+            borderwidth=1
+        ),
+        plot_bgcolor='rgba(250, 250, 250, 0.5)',
+        font=dict(size=12)
     )
+
+    # Ajouter une grille pour faciliter la lecture
+    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(200, 200, 200, 0.3)')
+    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(200, 200, 200, 0.3)')
+
     st.plotly_chart(fig, use_container_width=True)
+
+    # Statistiques comparatives
+    if len(selected_years) > 1:
+        st.markdown("#### 📊 Statistiques comparatives")
+        stats_cols = st.columns(len(selected_years))
+
+        for idx, selected_year in enumerate(sorted(selected_years, reverse=True)):
+            with stats_cols[idx]:
+                total_year = etl_utils.get_total_deaths(selected_year, month, dept, sex)
+                avg_age = etl_utils.get_average_age(selected_year, month, dept, sex)
+
+                st.metric(
+                    label=f"📅 {selected_year}",
+                    value=f"{total_year:,}".replace(",", " "),
+                    delta=f"Âge moy: {avg_age:.1f} ans" if avg_age else None
+                )
 
     # Two columns for heatmap and pyramid
     col1, col2 = st.columns(2)
 
+    # Use the most recent selected year for heatmap and pyramid
+    display_year = max(selected_years)
+
     with col1:
         # Graph 2: Calendar Heatmap
-        st.markdown("#### 🗓️ Heatmap Calendaire")
+        st.markdown(f"#### 🗓️ Heatmap Calendaire ({display_year})")
 
-        df_heatmap = etl_utils.get_deaths_by_month_day(year, dept, sex)
+        df_heatmap = etl_utils.get_deaths_by_month_day(display_year, dept, sex)
 
-        if not df_heatmap.empty and len(df_heatmap) > 0:
-            try:
-                # Pivot for heatmap
-                pivot = df_heatmap.pivot(index='month', columns='day', values='count').fillna(0)
+        if not df_heatmap.empty:
+            # Pivot for heatmap
+            pivot = df_heatmap.pivot(index='month', columns='day', values='count').fillna(0)
 
-                # Ensure we have valid data
-                if pivot.shape[0] > 0 and pivot.shape[1] > 0:
-                    month_names = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun',
-                                  'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc']
+            month_names = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun',
+                          'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc']
 
-                    # Get actual months in data
-                    actual_months = sorted(pivot.index.tolist())
-                    y_labels = [month_names[m-1] if 1 <= m <= 12 else str(m) for m in actual_months]
+            # Utiliser les colonnes réelles du pivot
+            actual_days = sorted(pivot.columns.tolist())
 
-                    # Get actual days in data
-                    actual_days = sorted(pivot.columns.tolist())
-
-                    fig = px.imshow(
-                        pivot.values,
-                        labels=dict(x="Jour", y="Mois", color="Décès"),
-                        x=actual_days,
-                        y=y_labels,
-                        color_continuous_scale='YlOrRd',
-                        aspect='auto'
-                    )
-                    fig.update_layout(height=450)
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("Données insuffisantes pour la heatmap")
-            except Exception as e:
-                st.warning(f"Impossible de générer la heatmap: {str(e)}")
+            fig = px.imshow(
+                pivot,
+                labels=dict(x="Jour", y="Mois", color="Décès"),
+                x=actual_days,
+                y=month_names[:len(pivot)],
+                color_continuous_scale='YlOrRd',
+                aspect='auto'
+            )
+            fig.update_layout(height=450)
+            st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("Données insuffisantes pour la heatmap")
 
     with col2:
         # Graph 3: Age Pyramid
-        st.markdown("#### 👥 Pyramide des âges")
+        st.markdown(f"#### 👥 Pyramide des âges ({display_year})")
 
-        df_pyramid = etl_utils.get_age_pyramid_data(year, month, dept)
+        df_pyramid = etl_utils.get_age_pyramid_data(display_year, month, dept)
 
         if not df_pyramid.empty:
             # Separate men and women
@@ -768,7 +842,7 @@ def main():
         return
 
     # Render sidebar and get filters
-    year, month, dept, sex, comparison_year = render_sidebar()
+    year, month, dept, sex = render_sidebar()
 
     # Main header
     st.markdown("# 📊 Mortalité France - Tableau de Bord")
@@ -786,10 +860,10 @@ def main():
         render_import_tab()
 
     with tab2:
-        render_synthesis_tab(year, month, dept, sex, comparison_year)
+        render_synthesis_tab(year, month, dept, sex)
 
     with tab3:
-        render_analysis_tab(year, month, dept, sex, comparison_year)
+        render_analysis_tab(year, month, dept, sex)
 
     with tab4:
         render_geography_tab(year, month, sex)
