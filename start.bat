@@ -78,17 +78,17 @@ echo    Installation des packages optionnels...
 python -m pip install watchdog pyarrow >nul 2>&1
 echo    ✓ Packages optionnels traités
 
-:: Lancer l'application
+:: Lancer l'application avec configuration automatique
 echo.
 echo [4/4] Lancement de l'application...
 echo.
 echo ══════════════════════════════════════════════════════════════════════
 echo    🚀 DÉMARRAGE DU SERVEUR...
-echo    ⏳ Patientez quelques secondes...
+echo    ⏳ Configuration automatique et démarrage...
 echo ══════════════════════════════════════════════════════════════════════
 echo.
 
-python launcher.py
+python start.py
 
 :: Si l'application se ferme
 echo.
