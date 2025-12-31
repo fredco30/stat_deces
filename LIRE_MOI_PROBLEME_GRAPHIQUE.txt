@@ -1,0 +1,86 @@
+╔═══════════════════════════════════════════════════════════════════╗
+║                                                                   ║
+║         📋 DOCUMENTATION PROBLÈME GRAPHIQUE PAR ANNÉE             ║
+║                                                                   ║
+╚═══════════════════════════════════════════════════════════════════╝
+
+J'ai créé 3 fichiers de documentation pour le problème du graphique
+"Évolution par année" qui affiche 1900-2025 au lieu de seulement 2024-2025.
+
+═══════════════════════════════════════════════════════════════════
+  📁 FICHIERS CRÉÉS
+═══════════════════════════════════════════════════════════════════
+
+1. PROBLEME_GRAPHIQUE_ANNEES.md
+   → Description complète du problème
+   → Code actuel
+   → Ce qui a été tenté (3 solutions, toutes échouées)
+   → Hypothèses sur la cause
+   → Informations contextuelles
+
+2. PROMPT_NOUVELLE_CONVERSATION.md
+   → Prompt prêt à copier-coller pour une nouvelle conversation
+   → Résumé concis du problème
+   → Contexte technique
+   → Question précise pour Claude
+
+3. INVESTIGATION_GET_AVAILABLE_YEARS.md
+   → Analyse de la fonction get_available_years()
+   → Code source de la fonction
+   → Explication du vrai problème
+   → 3 solutions possibles à tester
+   → Recommandation (Solution 3: requête SQL directe)
+
+═══════════════════════════════════════════════════════════════════
+  🎯 POUR DÉMARRER UNE NOUVELLE CONVERSATION
+═══════════════════════════════════════════════════════════════════
+
+1. Ouvrez le fichier: PROMPT_NOUVELLE_CONVERSATION.md
+
+2. Copiez tout le contenu
+
+3. Créez une nouvelle conversation avec Claude
+
+4. Collez le prompt
+
+5. Claude aura tout le contexte nécessaire pour résoudre le problème
+
+═══════════════════════════════════════════════════════════════════
+  💡 SOLUTION PROBABLE (à tester dans nouvelle conversation)
+═══════════════════════════════════════════════════════════════════
+
+Au lieu de faire:
+  available_years = etl_utils.get_available_years()
+  for y in available_years:
+      count = get_total_deaths(y, ...)
+
+Faire UNE SEULE requête SQL:
+  SELECT annee_deces, COUNT(*)
+  FROM deces
+  WHERE [filtres]
+  GROUP BY annee_deces
+
+Cela retournera UNIQUEMENT les années avec des données pour les
+filtres actuels.
+
+═══════════════════════════════════════════════════════════════════
+  📊 DIAGNOSTIC
+═══════════════════════════════════════════════════════════════════
+
+Problème identifié:
+  ✓ get_available_years() retourne bien toutes les années 1900-2025
+  ✓ Ces années sont probablement toutes présentes dans la base
+  ✓ Le filtre "count > 0" fonctionne mais Plotly affiche quand même
+    toutes les années sur l'axe X
+
+Solution recommandée:
+  → Ne PAS utiliser get_available_years()
+  → Faire une requête SQL directe qui groupe par année
+  → N'afficher que les années retournées par cette requête
+
+═══════════════════════════════════════════════════════════════════
+
+Tous les fichiers sont committes et pushés sur la branche:
+claude/fix-external-connection-MY56S
+
+Bonne chance pour la résolution ! 🚀
