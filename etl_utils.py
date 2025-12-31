@@ -634,10 +634,17 @@ def get_total_deaths(year: Optional[int] = None, month: Optional[int] = None,
 
 def get_deaths_by_year(month: Optional[int] = None,
                        department: Optional[str] = None,
-                       sexe: Optional[int] = None) -> pd.DataFrame:
+                       sexe: Optional[int] = None,
+                       min_threshold: int = 1000) -> pd.DataFrame:
     """
     Get death counts grouped by year with optional filters.
-    Returns only years that have data matching the filters.
+    Returns only years that have significant data (above threshold).
+
+    Args:
+        month: Filter by month
+        department: Filter by department
+        sexe: Filter by sex
+        min_threshold: Minimum deaths per year to include (default 1000)
 
     Returns:
         DataFrame with columns: annee_deces, count
@@ -661,7 +668,7 @@ def get_deaths_by_year(month: Optional[int] = None,
         query += " AND sexe = ?"
         params.append(sexe)
 
-    query += " GROUP BY annee_deces HAVING COUNT(*) > 0 ORDER BY annee_deces"
+    query += f" GROUP BY annee_deces HAVING COUNT(*) >= {min_threshold} ORDER BY annee_deces"
 
     df = conn.execute(query, params).df()
     conn.close()
