@@ -232,7 +232,8 @@ def render_import_tab():
         st.markdown("""
         **Instructions:**
         - Uploadez les fichiers CSV des décès de l'INSEE
-        - Format attendu: séparateur `;` avec colonnes `nomprenom`, `sexe`, `datenaiss`, `datedeces`, `lieudeces`
+        - Format attendu: séparateur `;` avec colonnes INSEE standard:
+          `nomprenom`, `sexe`, `datenaiss`, `lieunaiss`, `commnaiss`, `paysnaiss`, `datedeces`, `lieudeces`, `actedeces`
         - Les doublons sont automatiquement détectés et ignorés
         """)
 
