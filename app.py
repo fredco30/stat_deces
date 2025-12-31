@@ -415,12 +415,52 @@ def render_synthesis_tab(year, month, dept, sex):
 
     st.markdown("---")
 
+    # Yearly breakdown chart (all available years)
+    st.markdown("#### 📅 Évolution par année")
+
+    available_years = etl_utils.get_available_years()
+
+    if available_years:
+        yearly_data = []
+        for y in available_years:
+            count = etl_utils.get_total_deaths(y, month, dept, sex)
+            yearly_data.append({'Année': y, 'Décès': count})
+
+        df_yearly = pd.DataFrame(yearly_data)
+
+        fig = px.bar(
+            df_yearly,
+            x='Année',
+            y='Décès',
+            color='Décès',
+            color_continuous_scale='Blues',
+            text='Décès'
+        )
+        fig.update_traces(
+            texttemplate='%{text:,}'.replace(',', ' '),
+            textposition='outside'
+        )
+        fig.update_layout(
+            showlegend=False,
+            xaxis_title="Année",
+            yaxis_title="Nombre de décès",
+            height=400,
+            xaxis=dict(
+                tickmode='linear',
+                tick0=min(available_years),
+                dtick=1
+            )
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("---")
+
     # Monthly breakdown chart
     if year:
         col1, col2 = st.columns(2)
 
         with col1:
-            st.markdown("#### Décès par mois")
+            st.markdown(f"#### Décès par mois ({year})")
             monthly_data = []
             for m in range(1, 13):
                 count = etl_utils.get_total_deaths(year, m, dept, sex)
