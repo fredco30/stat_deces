@@ -617,10 +617,13 @@ def render_analysis_tab(year, month, dept, sex):
             month_names = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun',
                           'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc']
 
+            # Utiliser les colonnes réelles du pivot
+            actual_days = sorted(pivot.columns.tolist())
+
             fig = px.imshow(
                 pivot,
                 labels=dict(x="Jour", y="Mois", color="Décès"),
-                x=list(range(1, 32)),
+                x=actual_days,
                 y=month_names[:len(pivot)],
                 color_continuous_scale='YlOrRd',
                 aspect='auto'
