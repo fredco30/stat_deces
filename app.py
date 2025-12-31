@@ -533,23 +533,37 @@ def render_analysis_tab(year, month, dept, sex):
 
         df_heatmap = etl_utils.get_deaths_by_month_day(year, dept, sex)
 
-        if not df_heatmap.empty:
-            # Pivot for heatmap
-            pivot = df_heatmap.pivot(index='month', columns='day', values='count').fillna(0)
+        if not df_heatmap.empty and len(df_heatmap) > 0:
+            try:
+                # Pivot for heatmap
+                pivot = df_heatmap.pivot(index='month', columns='day', values='count').fillna(0)
 
-            month_names = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun',
-                          'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc']
+                # Ensure we have valid data
+                if pivot.shape[0] > 0 and pivot.shape[1] > 0:
+                    month_names = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun',
+                                  'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc']
 
-            fig = px.imshow(
-                pivot,
-                labels=dict(x="Jour", y="Mois", color="Décès"),
-                x=list(range(1, 32)),
-                y=month_names[:len(pivot)],
-                color_continuous_scale='YlOrRd',
-                aspect='auto'
-            )
-            fig.update_layout(height=450)
-            st.plotly_chart(fig, use_container_width=True)
+                    # Get actual months in data
+                    actual_months = sorted(pivot.index.tolist())
+                    y_labels = [month_names[m-1] if 1 <= m <= 12 else str(m) for m in actual_months]
+
+                    # Get actual days in data
+                    actual_days = sorted(pivot.columns.tolist())
+
+                    fig = px.imshow(
+                        pivot.values,
+                        labels=dict(x="Jour", y="Mois", color="Décès"),
+                        x=actual_days,
+                        y=y_labels,
+                        color_continuous_scale='YlOrRd',
+                        aspect='auto'
+                    )
+                    fig.update_layout(height=450)
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("Données insuffisantes pour la heatmap")
+            except Exception as e:
+                st.warning(f"Impossible de générer la heatmap: {str(e)}")
         else:
             st.info("Données insuffisantes pour la heatmap")
 
