@@ -421,34 +421,44 @@ def render_synthesis_tab(year, month, dept, sex):
     available_years = etl_utils.get_available_years()
 
     if available_years:
-        yearly_data = []
+        # Collect data only for years with deaths
+        years_list = []
+        deaths_list = []
+
         for y in available_years:
             count = etl_utils.get_total_deaths(y, month, dept, sex)
             # Only include years with actual data
             if count > 0:
-                # Convert year to string to force categorical display
-                yearly_data.append({'Année': str(y), 'Décès': count})
+                years_list.append(str(y))
+                deaths_list.append(count)
 
-        if yearly_data:
-            df_yearly = pd.DataFrame(yearly_data)
+        if years_list:
+            # Use go.Bar for complete control over x-axis
+            fig = go.Figure()
 
-            fig = px.bar(
-                df_yearly,
-                x='Année',
-                y='Décès',
-                color='Décès',
-                color_continuous_scale='Blues',
-                text='Décès'
-            )
-            fig.update_traces(
-                texttemplate='%{text:,}'.replace(',', ' '),
-                textposition='outside'
-            )
+            fig.add_trace(go.Bar(
+                x=years_list,
+                y=deaths_list,
+                text=[f"{d:,}".replace(",", " ") for d in deaths_list],
+                textposition='outside',
+                marker=dict(
+                    color=deaths_list,
+                    colorscale='Blues',
+                    showscale=True,
+                    colorbar=dict(title="Décès")
+                )
+            ))
+
             fig.update_layout(
-                showlegend=False,
                 xaxis_title="Année",
                 yaxis_title="Nombre de décès",
-                height=400
+                height=400,
+                showlegend=False,
+                xaxis=dict(
+                    type='category',  # Force categorical
+                    categoryorder='array',
+                    categoryarray=years_list
+                )
             )
             st.plotly_chart(fig, use_container_width=True)
         else:
