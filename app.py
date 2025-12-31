@@ -176,6 +176,29 @@ def render_sidebar():
         index=1 if years else 0
     )
 
+    # Comparison year filter (for analysis)
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 📊 Comparaison")
+
+    # Build comparison year options (exclude selected year)
+    comparison_years = [y for y in years if y != selected_year] if selected_year else years
+
+    # Default to N-1 if available
+    default_comparison = None
+    if selected_year and (selected_year - 1) in comparison_years:
+        default_comparison = comparison_years.index(selected_year - 1)
+    elif comparison_years:
+        default_comparison = 0
+
+    selected_comparison_year = st.sidebar.selectbox(
+        "Comparer avec",
+        options=[None] + comparison_years,
+        format_func=lambda x: "Aucune" if x is None else str(x),
+        index=(default_comparison + 1) if default_comparison is not None else 0
+    )
+
+    st.sidebar.markdown("---")
+
     # Month filter
     months = {
         None: "Tous",
@@ -215,7 +238,7 @@ def render_sidebar():
     if stats['date_range'][0] and stats['date_range'][1]:
         st.sidebar.caption(f"Période: {stats['date_range'][0]} à {stats['date_range'][1]}")
 
-    return selected_year, selected_month, selected_dept, selected_sex
+    return selected_year, selected_month, selected_dept, selected_sex, selected_comparison_year
 
 
 # ============================================================================
@@ -363,7 +386,7 @@ def render_import_tab():
 # SYNTHESIS TAB (KPIs)
 # ============================================================================
 
-def render_synthesis_tab(year, month, dept, sex):
+def render_synthesis_tab(year, month, dept, sex, comparison_year=None):
     """Render the synthesis dashboard with KPIs."""
     st.markdown("### 📊 Tableau de bord - Synthèse")
 
@@ -391,7 +414,24 @@ def render_synthesis_tab(year, month, dept, sex):
         )
 
     with col3:
-        if year:
+        if year and comparison_year:
+            # Use selected comparison year
+            current = etl_utils.get_total_deaths(year, month, dept, sex)
+            previous = etl_utils.get_total_deaths(comparison_year, month, dept, sex)
+            if previous and previous > 0:
+                evolution = round(((current - previous) / previous) * 100, 1)
+                delta_str = f"{evolution:+.1f}%"
+            else:
+                evolution = None
+                delta_str = "N/A"
+            st.metric(
+                label=f"📈 Évolution vs {comparison_year}",
+                value=delta_str,
+                delta=f"{evolution:.1f}%" if evolution else None,
+                delta_color="inverse"
+            )
+        elif year:
+            # Fallback to N-1
             evolution = etl_utils.get_yoy_evolution(year, month, dept, sex)
             delta_str = f"{evolution:+.1f}%" if evolution else "N/A"
             st.metric(
@@ -469,7 +509,7 @@ def render_synthesis_tab(year, month, dept, sex):
 # VISUAL ANALYSIS TAB
 # ============================================================================
 
-def render_analysis_tab(year, month, dept, sex):
+def render_analysis_tab(year, month, dept, sex, comparison_year=None):
     """Render visual analysis dashboard."""
     st.markdown("### 📈 Analyse Visuelle")
 
@@ -483,11 +523,14 @@ def render_analysis_tab(year, month, dept, sex):
         st.warning("Aucune donnée disponible pour les filtres sélectionnés.")
         return
 
-    # Graph 1: Daily evolution comparison (Year N vs N-1)
-    st.markdown("#### 📉 Évolution journalière comparée")
+    # Determine comparison year (use selected or fallback to N-1)
+    compare_year = comparison_year if comparison_year else (year - 1)
+
+    # Graph 1: Daily evolution comparison
+    st.markdown(f"#### 📉 Évolution journalière comparée ({year} vs {compare_year})")
 
     df_current = etl_utils.get_daily_deaths(year, month, dept, sex)
-    df_previous = etl_utils.get_daily_deaths(year - 1, month, dept, sex)
+    df_previous = etl_utils.get_daily_deaths(compare_year, month, dept, sex)
 
     fig = go.Figure()
 
@@ -511,7 +554,7 @@ def render_analysis_tab(year, month, dept, sex):
             x=df_previous['day_of_year'],
             y=df_previous['count'],
             mode='lines',
-            name=str(year - 1),
+            name=str(compare_year),
             line=dict(color='#95a5a6', width=2, dash='dot')
         ))
 
@@ -725,7 +768,7 @@ def main():
         return
 
     # Render sidebar and get filters
-    year, month, dept, sex = render_sidebar()
+    year, month, dept, sex, comparison_year = render_sidebar()
 
     # Main header
     st.markdown("# 📊 Mortalité France - Tableau de Bord")
@@ -743,10 +786,10 @@ def main():
         render_import_tab()
 
     with tab2:
-        render_synthesis_tab(year, month, dept, sex)
+        render_synthesis_tab(year, month, dept, sex, comparison_year)
 
     with tab3:
-        render_analysis_tab(year, month, dept, sex)
+        render_analysis_tab(year, month, dept, sex, comparison_year)
 
     with tab4:
         render_geography_tab(year, month, sex)
