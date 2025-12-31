@@ -1,0 +1,20 @@
+[server]
+# Bind to all network interfaces to allow external access
+address = "0.0.0.0"
+port = 8501
+headless = true
+
+# Enable CORS for external access
+enableCORS = false
+enableXsrfProtection = false
+
+[browser]
+gatherUsageStats = false
+serverAddress = "0.0.0.0"
+serverPort = 8501
+
+[theme]
+primaryColor = "#667eea"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f0f2f6"
+textColor = "#1a1a2e"

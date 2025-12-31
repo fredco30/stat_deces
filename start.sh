@@ -170,15 +170,16 @@ if [[ "$response" =~ ^[OoYy]$ ]]; then
     echo ""
     echo "══════════════════════════════════════════════════════════════════════"
     echo "   🚀 DÉMARRAGE DU SERVEUR..."
+    echo "   ⏳ Configuration automatique et démarrage..."
     echo "══════════════════════════════════════════════════════════════════════"
     echo ""
 
-    python "$MAIN_APP"
+    python start.py
 else
     echo ""
     echo "   Pour lancer l'application plus tard:"
     echo "   1. source $VENV_NAME/bin/activate"
-    echo "   2. python launcher.py"
+    echo "   2. python start.py"
     echo ""
 fi
 
