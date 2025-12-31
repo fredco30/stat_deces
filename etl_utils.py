@@ -761,6 +761,35 @@ def get_age_pyramid_data(year: Optional[int] = None, month: Optional[int] = None
     return df
 
 
+def get_deaths_by_year(month: Optional[int] = None, department: Optional[str] = None,
+                       sexe: Optional[int] = None) -> pd.DataFrame:
+    """Get death counts by year for time series."""
+    conn = get_connection()
+
+    query = """
+        SELECT annee_deces as year, COUNT(*) as count
+        FROM deces
+        WHERE annee_deces IS NOT NULL
+    """
+    params = []
+
+    if month:
+        query += " AND mois_deces = ?"
+        params.append(month)
+    if department:
+        query += " AND departement = ?"
+        params.append(department)
+    if sexe:
+        query += " AND sexe = ?"
+        params.append(sexe)
+
+    query += " GROUP BY annee_deces ORDER BY annee_deces"
+
+    df = conn.execute(query, params).df()
+    conn.close()
+    return df
+
+
 def get_deaths_by_department(year: Optional[int] = None, month: Optional[int] = None,
                              sexe: Optional[int] = None) -> pd.DataFrame:
     """Get death counts by department for map."""
