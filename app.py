@@ -749,12 +749,20 @@ def render_geography_tab(year, month, sex):
     """Render geographic analysis with choropleth map."""
     st.markdown("### 🗺️ Analyse Géographique")
 
-    # Get department data
-    df_dept = etl_utils.get_deaths_by_department(year, month, sex)
+    # Get department data with rates
+    if year:
+        df_dept = etl_utils.get_deaths_by_department_with_rates(year, month, sex)
+    else:
+        df_dept = etl_utils.get_deaths_by_department(year, month, sex)
+        df_dept['population'] = None
+        df_dept['rate'] = None
 
     if df_dept.empty:
         st.warning("Aucune donnée géographique disponible.")
         return
+
+    # Check if we have rate data
+    has_rate_data = year is not None and 'rate' in df_dept.columns and df_dept['rate'].notna().any()
 
     # Load GeoJSON
     geojson = etl_utils.get_geojson()
@@ -768,67 +776,637 @@ def render_geography_tab(year, month, sex):
     with col1:
         st.markdown("#### Carte choroplèthe des décès par département")
 
-        # Create Plotly choropleth
-        fig = px.choropleth(
-            df_dept,
-            geojson=geojson,
-            locations='code',
-            featureidkey='properties.code',
-            color='count',
-            color_continuous_scale='YlOrRd',
-            labels={'count': 'Décès', 'code': 'Département'},
-            title=''
-        )
+        # Create two maps: one for counts, one for rates
+        if has_rate_data:
+            # Create two sub-columns for the two maps
+            map_col1, map_col2 = st.columns(2)
 
-        fig.update_geos(
-            fitbounds="locations",
-            visible=False
-        )
+            with map_col1:
+                st.markdown("**Nombre de décès**")
 
-        fig.update_layout(
-            margin={"r": 0, "t": 0, "l": 0, "b": 0},
-            height=600,
-            coloraxis_colorbar=dict(
-                title="Nombre de décès",
-                thicknessmode="pixels",
-                thickness=20,
-                lenmode="pixels",
-                len=300
+                # Map with absolute counts
+                fig_count = px.choropleth(
+                    df_dept,
+                    geojson=geojson,
+                    locations='code',
+                    featureidkey='properties.code',
+                    color='count',
+                    color_continuous_scale='YlOrRd',
+                    labels={'count': 'Décès', 'code': 'Département'},
+                    hover_data={'count': True, 'rate': ':.2f'} if has_rate_data else None,
+                    title=''
+                )
+
+                fig_count.update_geos(
+                    fitbounds="locations",
+                    visible=False
+                )
+
+                fig_count.update_layout(
+                    margin={"r": 0, "t": 0, "l": 0, "b": 0},
+                    height=400,
+                    coloraxis_colorbar=dict(
+                        title="Décès",
+                        thicknessmode="pixels",
+                        thickness=15,
+                        lenmode="pixels",
+                        len=200
+                    )
+                )
+
+                st.plotly_chart(fig_count, use_container_width=True)
+
+            with map_col2:
+                st.markdown("**Taux de mortalité (/100k hab)**")
+
+                # Map with mortality rates
+                fig_rate = px.choropleth(
+                    df_dept,
+                    geojson=geojson,
+                    locations='code',
+                    featureidkey='properties.code',
+                    color='rate',
+                    color_continuous_scale='Reds',
+                    labels={'rate': 'Taux (/100k)', 'code': 'Département'},
+                    hover_data={'count': True, 'rate': ':.2f'},
+                    title=''
+                )
+
+                fig_rate.update_geos(
+                    fitbounds="locations",
+                    visible=False
+                )
+
+                fig_rate.update_layout(
+                    margin={"r": 0, "t": 0, "l": 0, "b": 0},
+                    height=400,
+                    coloraxis_colorbar=dict(
+                        title="Taux",
+                        thicknessmode="pixels",
+                        thickness=15,
+                        lenmode="pixels",
+                        len=200
+                    )
+                )
+
+                st.plotly_chart(fig_rate, use_container_width=True)
+        else:
+            # Only show count map if no rate data available
+            st.markdown("**Nombre de décès** (sélectionnez une année pour voir les taux)")
+
+            fig = px.choropleth(
+                df_dept,
+                geojson=geojson,
+                locations='code',
+                featureidkey='properties.code',
+                color='count',
+                color_continuous_scale='YlOrRd',
+                labels={'count': 'Décès', 'code': 'Département'},
+                title=''
             )
-        )
 
-        st.plotly_chart(fig, use_container_width=True)
+            fig.update_geos(
+                fitbounds="locations",
+                visible=False
+            )
+
+            fig.update_layout(
+                margin={"r": 0, "t": 0, "l": 0, "b": 0},
+                height=600,
+                coloraxis_colorbar=dict(
+                    title="Nombre de décès",
+                    thicknessmode="pixels",
+                    thickness=20,
+                    lenmode="pixels",
+                    len=300
+                )
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
 
     with col2:
         st.markdown("#### Top 10 Départements")
 
-        # Top departments
+        # Top departments by count
         top_depts = df_dept.nlargest(10, 'count')
 
-        fig = px.bar(
-            top_depts,
-            x='count',
-            y='code',
-            orientation='h',
-            color='count',
-            color_continuous_scale='YlOrRd'
-        )
+        if has_rate_data:
+            # Create a combined display with both count and rate
+            fig = make_subplots(
+                rows=1, cols=2,
+                subplot_titles=("Par nombre", "Par taux"),
+                horizontal_spacing=0.15
+            )
 
-        fig.update_layout(
-            showlegend=False,
-            xaxis_title="Décès",
-            yaxis_title="Département",
-            height=400,
-            yaxis={'categoryorder': 'total ascending'}
-        )
+            # Bar chart for counts
+            top_count = df_dept.nlargest(10, 'count')
+            fig.add_trace(
+                go.Bar(
+                    x=top_count['count'],
+                    y=top_count['code'],
+                    orientation='h',
+                    marker_color='#e74c3c',
+                    showlegend=False,
+                    hovertemplate='<b>%{y}</b><br>Décès: %{x}<extra></extra>'
+                ),
+                row=1, col=1
+            )
 
-        st.plotly_chart(fig, use_container_width=True)
+            # Bar chart for rates
+            top_rate = df_dept.nlargest(10, 'rate')
+            fig.add_trace(
+                go.Bar(
+                    x=top_rate['rate'],
+                    y=top_rate['code'],
+                    orientation='h',
+                    marker_color='#c0392b',
+                    showlegend=False,
+                    hovertemplate='<b>%{y}</b><br>Taux: %{x:.2f}<extra></extra>'
+                ),
+                row=1, col=2
+            )
+
+            fig.update_xaxes(title_text="Décès", row=1, col=1)
+            fig.update_xaxes(title_text="Taux (/100k)", row=1, col=2)
+
+            fig.update_yaxes(categoryorder='total ascending', row=1, col=1)
+            fig.update_yaxes(categoryorder='total ascending', row=1, col=2)
+
+            fig.update_layout(height=400, showlegend=False)
+
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            # Only show count bar chart
+            fig = px.bar(
+                top_depts,
+                x='count',
+                y='code',
+                orientation='h',
+                color='count',
+                color_continuous_scale='YlOrRd'
+            )
+
+            fig.update_layout(
+                showlegend=False,
+                xaxis_title="Décès",
+                yaxis_title="Département",
+                height=400,
+                yaxis={'categoryorder': 'total ascending'}
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
 
         # Summary stats
         st.markdown("#### Statistiques")
-        st.metric("Moyenne par département", f"{df_dept['count'].mean():,.0f}".replace(",", " "))
-        st.metric("Médiane", f"{df_dept['count'].median():,.0f}".replace(",", " "))
-        st.metric("Écart-type", f"{df_dept['count'].std():,.0f}".replace(",", " "))
+
+        col_stat1, col_stat2 = st.columns(2)
+
+        with col_stat1:
+            st.metric("📊 Décès moyens", f"{df_dept['count'].mean():,.0f}".replace(",", " "))
+            st.metric("📈 Médiane", f"{df_dept['count'].median():,.0f}".replace(",", " "))
+
+        with col_stat2:
+            if has_rate_data:
+                avg_rate = df_dept['rate'].mean()
+                median_rate = df_dept['rate'].median()
+                st.metric("📊 Taux moyen", f"{avg_rate:.1f}/100k" if pd.notna(avg_rate) else "N/A")
+                st.metric("📈 Taux médian", f"{median_rate:.1f}/100k" if pd.notna(median_rate) else "N/A")
+            else:
+                st.metric("Écart-type", f"{df_dept['count'].std():,.0f}".replace(",", " "))
+                st.info("Sélectionnez une année pour voir les taux de mortalité")
+
+
+# ============================================================================
+# AGE TRENDS TAB
+# ============================================================================
+
+def render_age_trends_tab(year, month, dept, sex):
+    """Render age trends analysis dashboard."""
+    st.markdown("### 📈 Tendances de Mortalité par Âge")
+
+    # Get available years
+    available_years = etl_utils.get_available_years()
+
+    if not available_years:
+        st.warning("Aucune donnée disponible.")
+        return
+
+    # ========================================================================
+    # FILTERS SECTION
+    # ========================================================================
+
+    st.markdown("#### 🎯 Configuration de l'analyse")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        # Age group size selector
+        age_group_type = st.selectbox(
+            "Découpage des tranches d'âge",
+            options=["5 ans", "10 ans", "Personnalisé"],
+            index=0
+        )
+
+        if age_group_type == "5 ans":
+            age_group_size = 5
+        elif age_group_type == "10 ans":
+            age_group_size = 10
+        else:
+            age_group_size = st.number_input(
+                "Taille de la tranche (en années)",
+                min_value=1,
+                max_value=20,
+                value=5,
+                step=1
+            )
+
+    with col2:
+        # Year selector (multi-select)
+        default_years = [year] if year and year in available_years else [available_years[0]]
+
+        selected_years = st.multiselect(
+            "Années à analyser",
+            options=available_years,
+            default=default_years,
+            help="Sélectionnez une ou plusieurs années"
+        )
+
+    with col3:
+        # Quick select buttons
+        if st.button("📊 Toutes les années", key="all_years_age"):
+            selected_years = available_years
+            st.rerun()
+
+    if not selected_years:
+        st.warning("Veuillez sélectionner au moins une année.")
+        return
+
+    # Get the most recent year for single-year analyses
+    display_year = max(selected_years)
+
+    # ========================================================================
+    # KPIs SECTION
+    # ========================================================================
+
+    st.markdown("---")
+
+    # Get KPI data
+    total_deaths = sum([etl_utils.get_total_deaths(y, month, dept, sex) for y in selected_years])
+
+    # Median age for most recent year
+    median_data = etl_utils.get_median_age_by_year([display_year])
+    median_age = median_data.iloc[0]['median_age'] if not median_data.empty else None
+
+    # Most affected age group
+    most_affected_age, most_affected_count = etl_utils.get_most_affected_age_group(
+        display_year, age_group_size
+    )
+
+    # Evolution vs previous year (for display_year)
+    evolution = None
+    if len(selected_years) >= 2:
+        sorted_years = sorted(selected_years)
+        if display_year in sorted_years and display_year == sorted_years[-1]:
+            prev_year = sorted_years[-2]
+            current_deaths = etl_utils.get_total_deaths(display_year, month, dept, sex)
+            prev_deaths = etl_utils.get_total_deaths(prev_year, month, dept, sex)
+            if prev_deaths and prev_deaths > 0:
+                evolution = ((current_deaths - prev_deaths) / prev_deaths) * 100
+
+    # Display KPIs
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric(
+            label="📊 Total Décès",
+            value=f"{total_deaths:,}".replace(",", " "),
+            help=f"Total sur {len(selected_years)} année(s)"
+        )
+
+    with col2:
+        st.metric(
+            label="📈 Âge médian",
+            value=f"{median_age:.1f} ans" if median_age else "N/A",
+            help=f"Âge médian de décès en {display_year}"
+        )
+
+    with col3:
+        if most_affected_age is not None:
+            age_label = f"{most_affected_age}-{most_affected_age + age_group_size - 1} ans"
+            st.metric(
+                label="🎯 Tranche la plus touchée",
+                value=age_label,
+                delta=f"{most_affected_count:,} décès".replace(",", " "),
+                help=f"Tranche d'âge avec le plus de décès en {display_year}"
+            )
+        else:
+            st.metric(label="🎯 Tranche la plus touchée", value="N/A")
+
+    with col4:
+        if evolution is not None:
+            st.metric(
+                label=f"📊 Évolution {sorted_years[-2]} → {display_year}",
+                value=f"{evolution:+.1f}%",
+                delta=f"{evolution:.1f}%",
+                delta_color="inverse"
+            )
+        else:
+            st.metric(label="📊 Évolution", value="N/A")
+
+    st.markdown("---")
+
+    # ========================================================================
+    # TREND CURVES (Multi-year evolution by age group)
+    # ========================================================================
+
+    st.markdown("#### 📉 Évolution par Tranche d'Âge")
+
+    df_trends = etl_utils.get_mortality_by_age_year(
+        age_group_size=age_group_size,
+        year_filter=selected_years,
+        month=month,
+        dept=dept,
+        sexe=sex
+    )
+
+    if not df_trends.empty:
+        # Create interactive line chart
+        fig = go.Figure()
+
+        # Get unique age groups
+        age_groups = sorted(df_trends['age_group'].unique())
+
+        # Color palette
+        color_palette = [
+            '#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6',
+            '#1abc9c', '#e67e22', '#34495e', '#16a085', '#c0392b',
+            '#27ae60', '#2980b9', '#8e44ad', '#d35400'
+        ]
+
+        for idx, age in enumerate(age_groups):
+            df_age = df_trends[df_trends['age_group'] == age]
+            age_label = f"{int(age)}-{int(age) + age_group_size - 1} ans"
+
+            color = color_palette[idx % len(color_palette)]
+
+            fig.add_trace(go.Scatter(
+                x=df_age['annee'],
+                y=df_age['deaths'],
+                mode='lines+markers',
+                name=age_label,
+                line=dict(color=color, width=2),
+                marker=dict(size=6),
+                hovertemplate=f'<b>{age_label}</b><br>Année: %{{x}}<br>Décès: %{{y}}<extra></extra>'
+            ))
+
+        fig.update_layout(
+            xaxis_title="Année",
+            yaxis_title="Nombre de décès",
+            height=500,
+            hovermode='x unified',
+            legend=dict(
+                orientation="v",
+                yanchor="top",
+                y=0.99,
+                xanchor="right",
+                x=0.99,
+                bgcolor="rgba(255, 255, 255, 0.8)"
+            )
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Données insuffisantes pour afficher l'évolution par tranche d'âge.")
+
+    st.markdown("---")
+
+    # ========================================================================
+    # HEATMAP: Age x Year
+    # ========================================================================
+
+    col1, col2 = st.columns([2, 1])
+
+    with col1:
+        st.markdown("#### 🔥 Heatmap Âge × Année")
+
+        if not df_trends.empty and len(selected_years) > 1:
+            # Pivot for heatmap
+            pivot_heatmap = df_trends.pivot(index='age_group', columns='annee', values='deaths').fillna(0)
+
+            # Create age labels
+            age_labels = [f"{int(age)}-{int(age) + age_group_size - 1}" for age in pivot_heatmap.index]
+
+            fig = px.imshow(
+                pivot_heatmap.values,
+                labels=dict(x="Année", y="Tranche d'âge", color="Décès"),
+                x=[str(int(y)) for y in pivot_heatmap.columns],
+                y=age_labels,
+                color_continuous_scale='YlOrRd',
+                aspect='auto'
+            )
+
+            fig.update_layout(height=500)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Sélectionnez plusieurs années pour afficher la heatmap.")
+
+    with col2:
+        st.markdown("#### 📊 Taux de Mortalité")
+
+        if not df_trends.empty and 'rate' in df_trends.columns:
+            # Show top age groups by mortality rate (most recent year)
+            df_recent = df_trends[df_trends['annee'] == display_year].copy()
+
+            if not df_recent.empty and df_recent['rate'].notna().any():
+                df_recent = df_recent.sort_values('rate', ascending=False).head(10)
+                df_recent['age_label'] = df_recent['age_group'].apply(
+                    lambda x: f"{int(x)}-{int(x) + age_group_size - 1}"
+                )
+
+                fig = px.bar(
+                    df_recent,
+                    x='rate',
+                    y='age_label',
+                    orientation='h',
+                    color='rate',
+                    color_continuous_scale='Reds',
+                    labels={'rate': 'Taux (/100k)', 'age_label': 'Âge'}
+                )
+
+                fig.update_layout(
+                    showlegend=False,
+                    height=500,
+                    yaxis={'categoryorder': 'total ascending'}
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Données de population non disponibles pour calculer les taux.")
+        else:
+            st.info("Données de population non disponibles.")
+
+    st.markdown("---")
+
+    # ========================================================================
+    # COMPARATIVE PYRAMIDS
+    # ========================================================================
+
+    st.markdown("#### 👥 Pyramides des Âges Comparatives")
+
+    # Select up to 3 years for comparison
+    comparison_years = sorted(selected_years, reverse=True)[:3]
+
+    if len(comparison_years) > 0:
+        cols = st.columns(min(len(comparison_years), 3))
+
+        for idx, comp_year in enumerate(comparison_years):
+            with cols[idx]:
+                st.markdown(f"**Année {comp_year}**")
+
+                df_pyramid = etl_utils.get_age_pyramid_data(comp_year, month, dept)
+
+                if not df_pyramid.empty:
+                    # Separate men and women
+                    df_men = df_pyramid[df_pyramid['sexe'] == 1].copy()
+                    df_women = df_pyramid[df_pyramid['sexe'] == 2].copy()
+
+                    # Create age labels
+                    df_men['age_label'] = df_men['age_group'].apply(lambda x: f"{int(x)}-{int(x)+4}")
+                    df_women['age_label'] = df_women['age_group'].apply(lambda x: f"{int(x)}-{int(x)+4}")
+
+                    # Men values negative for pyramid effect
+                    df_men['count_display'] = -df_men['count']
+
+                    fig = go.Figure()
+
+                    # Men (left side)
+                    fig.add_trace(go.Bar(
+                        y=df_men['age_label'],
+                        x=df_men['count_display'],
+                        orientation='h',
+                        name='H',
+                        marker_color='#3498db'
+                    ))
+
+                    # Women (right side)
+                    fig.add_trace(go.Bar(
+                        y=df_women['age_label'],
+                        x=df_women['count'],
+                        orientation='h',
+                        name='F',
+                        marker_color='#e74c3c'
+                    ))
+
+                    max_val = max(df_men['count'].max(), df_women['count'].max()) if not df_men.empty and not df_women.empty else 1000
+
+                    fig.update_layout(
+                        barmode='overlay',
+                        xaxis=dict(
+                            title='',
+                            range=[-max_val * 1.1, max_val * 1.1],
+                            tickvals=[-max_val, 0, max_val],
+                            ticktext=[f'{int(max_val)}', '0', f'{int(max_val)}']
+                        ),
+                        yaxis=dict(title=''),
+                        height=400,
+                        showlegend=True,
+                        legend=dict(orientation="h", y=1.05)
+                    )
+
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info(f"Pas de données pour {comp_year}")
+    else:
+        st.info("Sélectionnez au moins une année.")
+
+    st.markdown("---")
+
+    # ========================================================================
+    # DETAILED TABLE WITH EVOLUTION %
+    # ========================================================================
+
+    st.markdown("#### 📋 Tableau Détaillé avec Évolutions")
+
+    if not df_trends.empty:
+        # Get summary with evolution percentages
+        df_summary = etl_utils.get_age_trends_summary(selected_years, age_group_size)
+
+        if not df_summary.empty:
+            # Format the table
+            df_display = df_summary.copy()
+
+            # Create age label
+            df_display['Tranche d\'âge'] = df_display['age_group'].apply(
+                lambda x: f"{int(x)}-{int(x) + age_group_size - 1} ans"
+            )
+
+            # Reorder columns
+            cols = ['Tranche d\'âge']
+            for year in sorted(selected_years):
+                if f'deaths_{year}' in df_display.columns:
+                    cols.append(f'deaths_{year}')
+
+            if 'evolution_pct' in df_display.columns:
+                cols.append('evolution_pct')
+
+            df_display = df_display[cols]
+
+            # Rename columns
+            rename_dict = {'Tranche d\'âge': 'Tranche d\'âge'}
+            for year in sorted(selected_years):
+                if f'deaths_{year}' in df_display.columns:
+                    rename_dict[f'deaths_{year}'] = f'Décès {year}'
+
+            if 'evolution_pct' in df_display.columns:
+                rename_dict['evolution_pct'] = 'Évolution %'
+
+            df_display = df_display.rename(columns=rename_dict)
+
+            # Display table
+            st.dataframe(
+                df_display,
+                use_container_width=True,
+                hide_index=True,
+                height=400
+            )
+        else:
+            st.info("Pas assez de données pour le tableau comparatif.")
+    else:
+        st.info("Aucune donnée disponible.")
+
+    # ========================================================================
+    # EXPORT EXCEL BUTTON
+    # ========================================================================
+
+    st.markdown("---")
+
+    col1, col2, col3 = st.columns([1, 1, 1])
+
+    with col2:
+        if st.button("📥 Exporter vers Excel", type="primary", use_container_width=True):
+            try:
+                # Generate Excel file
+                excel_bytes = etl_utils.export_age_trends_to_excel(
+                    years=selected_years,
+                    age_group_size=age_group_size,
+                    month=month,
+                    dept=dept,
+                    sexe=sex
+                )
+
+                # Create download button
+                st.download_button(
+                    label="💾 Télécharger le fichier Excel",
+                    data=excel_bytes,
+                    file_name=f"tendances_mortalite_age_{'-'.join(map(str, selected_years))}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+
+                st.success("✅ Fichier Excel généré avec succès !")
+
+            except Exception as e:
+                st.error(f"❌ Erreur lors de la génération du fichier Excel: {str(e)}")
 
 
 # ============================================================================
@@ -849,11 +1427,12 @@ def main():
     st.markdown("*Analyse des données de décès INSEE*")
 
     # Create tabs
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📥 Import",
         "📊 Synthèse",
         "📈 Analyse Visuelle",
-        "🗺️ Géographie"
+        "🗺️ Géographie",
+        "📈 Tendances par Âge"
     ])
 
     with tab1:
@@ -867,6 +1446,9 @@ def main():
 
     with tab4:
         render_geography_tab(year, month, sex)
+
+    with tab5:
+        render_age_trends_tab(year, month, dept, sex)
 
 
 if __name__ == "__main__":
