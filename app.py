@@ -426,7 +426,8 @@ def render_synthesis_tab(year, month, dept, sex):
             count = etl_utils.get_total_deaths(y, month, dept, sex)
             # Only include years with actual data
             if count > 0:
-                yearly_data.append({'Année': y, 'Décès': count})
+                # Convert year to string to force categorical display
+                yearly_data.append({'Année': str(y), 'Décès': count})
 
         if yearly_data:
             df_yearly = pd.DataFrame(yearly_data)
@@ -447,10 +448,7 @@ def render_synthesis_tab(year, month, dept, sex):
                 showlegend=False,
                 xaxis_title="Année",
                 yaxis_title="Nombre de décès",
-                height=400,
-                xaxis=dict(
-                    type='category'  # Use category type for cleaner display
-                )
+                height=400
             )
             st.plotly_chart(fig, use_container_width=True)
         else:
