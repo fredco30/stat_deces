@@ -1,0 +1,687 @@
+"""
+ETL Utilities for French Mortality Data Application
+Handles DuckDB operations, CSV import, data cleaning, and transformations.
+"""
+
+import duckdb
+import pandas as pd
+import os
+from pathlib import Path
+from typing import Tuple, Optional, List
+import hashlib
+import requests
+
+
+# Database configuration
+DB_PATH = Path(__file__).parent / "mortality_data.duckdb"
+GEOJSON_URL = "https://raw.githubusercontent.com/gregoiredavid/france-geojson/master/departements.geojson"
+GEOJSON_PATH = Path(__file__).parent / "departements.geojson"
+
+
+def get_connection() -> duckdb.DuckDBPyConnection:
+    """Get a DuckDB connection."""
+    return duckdb.connect(str(DB_PATH))
+
+
+def init_database() -> None:
+    """Initialize the database with required tables."""
+    conn = get_connection()
+
+    # Main deaths table with unique constraint to prevent duplicates
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS deces (
+            id INTEGER PRIMARY KEY,
+            nomprenom VARCHAR,
+            sexe INTEGER,
+            datenaiss DATE,
+            lieunaiss VARCHAR,
+            commnaiss VARCHAR,
+            paysnaiss VARCHAR,
+            datedeces DATE,
+            lieudeces VARCHAR,
+            actedeces VARCHAR,
+            -- Computed columns
+            annee_deces INTEGER,
+            mois_deces INTEGER,
+            jour_deces INTEGER,
+            age_deces DOUBLE,
+            departement VARCHAR,
+            -- Hash for deduplication
+            hash_unique VARCHAR UNIQUE
+        )
+    """)
+
+    # Import tracking table
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS import_logs (
+            id INTEGER PRIMARY KEY,
+            filename VARCHAR,
+            import_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            rows_added INTEGER,
+            rows_duplicates INTEGER,
+            status VARCHAR
+        )
+    """)
+
+    # Create indexes for performance
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_deces_annee ON deces(annee_deces)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_deces_mois ON deces(mois_deces)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_deces_dept ON deces(departement)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_deces_sexe ON deces(sexe)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_deces_date ON deces(datedeces)")
+
+    conn.close()
+
+
+def parse_date_insee(date_str: str) -> Optional[str]:
+    """
+    Parse INSEE date format (YYYYMMDD) to ISO format (YYYY-MM-DD).
+    Returns None if invalid.
+    """
+    if not date_str or len(str(date_str)) < 8:
+        return None
+
+    date_str = str(date_str).strip()
+
+    # Handle partial dates (e.g., year only or year-month only)
+    if len(date_str) == 4:  # Year only
+        return f"{date_str}-01-01"
+    elif len(date_str) == 6:  # Year-month
+        return f"{date_str[:4]}-{date_str[4:6]}-01"
+    elif len(date_str) >= 8:
+        year = date_str[:4]
+        month = date_str[4:6]
+        day = date_str[6:8]
+
+        # Validate
+        try:
+            y, m, d = int(year), int(month), int(day)
+            if 1800 <= y <= 2100 and 1 <= m <= 12 and 1 <= d <= 31:
+                return f"{year}-{month}-{day}"
+        except ValueError:
+            pass
+
+    return None
+
+
+def extract_departement(lieu_deces: str) -> str:
+    """
+    Extract department code from lieu_deces.
+    - 2 first chars for metropolitan France
+    - 3 first chars for DOM-TOM (starting with 97)
+    """
+    if not lieu_deces:
+        return "00"
+
+    lieu = str(lieu_deces).strip()
+
+    if len(lieu) < 2:
+        return "00"
+
+    # DOM-TOM departments start with 97
+    if lieu.startswith("97") and len(lieu) >= 3:
+        return lieu[:3]
+
+    # Corsica: 2A and 2B
+    if lieu.startswith("2A") or lieu.startswith("2B"):
+        return lieu[:2]
+
+    # Standard metropolitan departments
+    return lieu[:2]
+
+
+def compute_hash(row: dict) -> str:
+    """
+    Compute unique hash for deduplication.
+    Uses: nomprenom + datenaiss + datedeces + lieudeces
+    """
+    key = f"{row.get('nomprenom', '')}{row.get('datenaiss', '')}{row.get('datedeces', '')}{row.get('lieudeces', '')}"
+    return hashlib.md5(key.encode()).hexdigest()
+
+
+def calculate_age(datenaiss: str, datedeces: str) -> Optional[float]:
+    """Calculate age at death in years."""
+    if not datenaiss or not datedeces:
+        return None
+
+    try:
+        from datetime import datetime
+        birth = datetime.strptime(datenaiss, "%Y-%m-%d")
+        death = datetime.strptime(datedeces, "%Y-%m-%d")
+        age = (death - birth).days / 365.25
+        return round(age, 2) if age >= 0 else None
+    except (ValueError, TypeError):
+        return None
+
+
+def process_csv_file(file_content: bytes, filename: str) -> Tuple[int, int, str]:
+    """
+    Process a CSV file and insert data into DuckDB.
+
+    Args:
+        file_content: Raw bytes of the CSV file
+        filename: Original filename for logging
+
+    Returns:
+        Tuple of (rows_added, duplicates_ignored, status_message)
+    """
+    import io
+
+    try:
+        # Try different encodings
+        content_str = None
+        for encoding in ['utf-8', 'latin-1', 'cp1252']:
+            try:
+                content_str = file_content.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+
+        if content_str is None:
+            return 0, 0, "Erreur: Impossible de décoder le fichier"
+
+        # Read CSV with pandas
+        df = pd.read_csv(
+            io.StringIO(content_str),
+            sep=';',
+            dtype=str,
+            on_bad_lines='skip'
+        )
+
+        # Normalize column names (lowercase, strip)
+        df.columns = [col.lower().strip().replace('"', '') for col in df.columns]
+
+        # Required columns check
+        required_cols = ['nomprenom', 'sexe', 'datenaiss', 'datedeces', 'lieudeces']
+        missing_cols = [col for col in required_cols if col not in df.columns]
+
+        if missing_cols:
+            return 0, 0, f"Colonnes manquantes: {', '.join(missing_cols)}"
+
+        conn = get_connection()
+        rows_added = 0
+        duplicates = 0
+
+        for _, row in df.iterrows():
+            try:
+                # Parse dates
+                datenaiss_iso = parse_date_insee(row.get('datenaiss', ''))
+                datedeces_iso = parse_date_insee(row.get('datedeces', ''))
+
+                if not datedeces_iso:
+                    continue  # Skip rows without valid death date
+
+                # Extract components from death date
+                annee_deces = int(datedeces_iso[:4])
+                mois_deces = int(datedeces_iso[5:7])
+                jour_deces = int(datedeces_iso[8:10])
+
+                # Calculate age
+                age_deces = calculate_age(datenaiss_iso, datedeces_iso)
+
+                # Extract department
+                departement = extract_departement(row.get('lieudeces', ''))
+
+                # Compute deduplication hash
+                hash_unique = compute_hash(row)
+
+                # Parse sexe
+                try:
+                    sexe = int(str(row.get('sexe', '0')).strip())
+                except ValueError:
+                    sexe = 0
+
+                # Insert with conflict handling (ignore duplicates)
+                conn.execute("""
+                    INSERT OR IGNORE INTO deces (
+                        nomprenom, sexe, datenaiss, lieunaiss, commnaiss, paysnaiss,
+                        datedeces, lieudeces, actedeces,
+                        annee_deces, mois_deces, jour_deces, age_deces, departement,
+                        hash_unique
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, [
+                    str(row.get('nomprenom', '')),
+                    sexe,
+                    datenaiss_iso,
+                    str(row.get('lieunaiss', '')),
+                    str(row.get('commnaiss', '')),
+                    str(row.get('paysnaiss', '')),
+                    datedeces_iso,
+                    str(row.get('lieudeces', '')),
+                    str(row.get('actedeces', '')),
+                    annee_deces,
+                    mois_deces,
+                    jour_deces,
+                    age_deces,
+                    departement,
+                    hash_unique
+                ])
+
+                # Check if row was actually inserted
+                if conn.fetchone() is None:
+                    rows_added += 1
+                else:
+                    duplicates += 1
+
+            except Exception as e:
+                duplicates += 1
+                continue
+
+        # Log import
+        conn.execute("""
+            INSERT INTO import_logs (filename, rows_added, rows_duplicates, status)
+            VALUES (?, ?, ?, ?)
+        """, [filename, rows_added, duplicates, 'success'])
+
+        conn.close()
+
+        # Recount to get accurate numbers
+        conn = get_connection()
+        result = conn.execute("SELECT changes()").fetchone()
+        conn.close()
+
+        return rows_added, duplicates, f"Import réussi: {rows_added} lignes ajoutées, {duplicates} doublons ignorés"
+
+    except Exception as e:
+        return 0, 0, f"Erreur lors de l'import: {str(e)}"
+
+
+def import_csv_batch(file_content: bytes, filename: str, progress_callback=None) -> Tuple[int, int, str]:
+    """
+    Optimized batch import for large CSV files.
+    Uses DuckDB's native CSV reader for better performance.
+    """
+    import io
+    import tempfile
+
+    try:
+        # Write to temp file for DuckDB to read directly
+        with tempfile.NamedTemporaryFile(mode='wb', suffix='.csv', delete=False) as tmp:
+            tmp.write(file_content)
+            tmp_path = tmp.name
+
+        conn = get_connection()
+
+        # Get count before import
+        count_before = conn.execute("SELECT COUNT(*) FROM deces").fetchone()[0]
+
+        # Read CSV directly with DuckDB
+        try:
+            df = conn.execute(f"""
+                SELECT * FROM read_csv_auto('{tmp_path}',
+                    delim=';',
+                    header=true,
+                    ignore_errors=true,
+                    all_varchar=true
+                )
+            """).df()
+        except Exception as e:
+            # Fallback to pandas method
+            os.unlink(tmp_path)
+            return process_csv_file(file_content, filename)
+
+        # Clean up temp file
+        os.unlink(tmp_path)
+
+        # Normalize column names
+        df.columns = [col.lower().strip().replace('"', '') for col in df.columns]
+
+        # Process in batches
+        batch_size = 10000
+        total_rows = len(df)
+        rows_added = 0
+        duplicates = 0
+
+        for i in range(0, total_rows, batch_size):
+            batch = df.iloc[i:i+batch_size]
+
+            for _, row in batch.iterrows():
+                try:
+                    datenaiss_iso = parse_date_insee(row.get('datenaiss', ''))
+                    datedeces_iso = parse_date_insee(row.get('datedeces', ''))
+
+                    if not datedeces_iso:
+                        continue
+
+                    annee_deces = int(datedeces_iso[:4])
+                    mois_deces = int(datedeces_iso[5:7])
+                    jour_deces = int(datedeces_iso[8:10])
+                    age_deces = calculate_age(datenaiss_iso, datedeces_iso)
+                    departement = extract_departement(row.get('lieudeces', ''))
+                    hash_unique = compute_hash(row.to_dict())
+
+                    try:
+                        sexe = int(str(row.get('sexe', '0')).strip())
+                    except ValueError:
+                        sexe = 0
+
+                    conn.execute("""
+                        INSERT OR IGNORE INTO deces (
+                            nomprenom, sexe, datenaiss, lieunaiss, commnaiss, paysnaiss,
+                            datedeces, lieudeces, actedeces,
+                            annee_deces, mois_deces, jour_deces, age_deces, departement,
+                            hash_unique
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, [
+                        str(row.get('nomprenom', '')),
+                        sexe,
+                        datenaiss_iso,
+                        str(row.get('lieunaiss', '')),
+                        str(row.get('commnaiss', '')),
+                        str(row.get('paysnaiss', '')),
+                        datedeces_iso,
+                        str(row.get('lieudeces', '')),
+                        str(row.get('actedeces', '')),
+                        annee_deces,
+                        mois_deces,
+                        jour_deces,
+                        age_deces,
+                        departement,
+                        hash_unique
+                    ])
+                except Exception:
+                    duplicates += 1
+                    continue
+
+            if progress_callback:
+                progress_callback(min(i + batch_size, total_rows) / total_rows)
+
+        # Get count after import
+        count_after = conn.execute("SELECT COUNT(*) FROM deces").fetchone()[0]
+        rows_added = count_after - count_before
+        duplicates = total_rows - rows_added
+
+        # Log import
+        conn.execute("""
+            INSERT INTO import_logs (filename, rows_added, rows_duplicates, status)
+            VALUES (?, ?, ?, ?)
+        """, [filename, rows_added, duplicates, 'success'])
+
+        conn.close()
+
+        return rows_added, duplicates, f"Import réussi: {rows_added} lignes ajoutées, {duplicates} doublons ignorés"
+
+    except Exception as e:
+        return 0, 0, f"Erreur: {str(e)}"
+
+
+# ============================================================================
+# QUERY FUNCTIONS FOR DASHBOARD
+# ============================================================================
+
+def get_available_years() -> List[int]:
+    """Get list of years with data."""
+    conn = get_connection()
+    result = conn.execute("""
+        SELECT DISTINCT annee_deces
+        FROM deces
+        WHERE annee_deces IS NOT NULL
+        ORDER BY annee_deces DESC
+    """).fetchall()
+    conn.close()
+    return [r[0] for r in result]
+
+
+def get_available_departments() -> List[str]:
+    """Get list of departments with data."""
+    conn = get_connection()
+    result = conn.execute("""
+        SELECT DISTINCT departement
+        FROM deces
+        WHERE departement IS NOT NULL AND departement != '00'
+        ORDER BY departement
+    """).fetchall()
+    conn.close()
+    return [r[0] for r in result]
+
+
+def get_total_deaths(year: Optional[int] = None, month: Optional[int] = None,
+                     department: Optional[str] = None, sexe: Optional[int] = None) -> int:
+    """Get total death count with optional filters."""
+    conn = get_connection()
+
+    query = "SELECT COUNT(*) FROM deces WHERE 1=1"
+    params = []
+
+    if year:
+        query += " AND annee_deces = ?"
+        params.append(year)
+    if month:
+        query += " AND mois_deces = ?"
+        params.append(month)
+    if department:
+        query += " AND departement = ?"
+        params.append(department)
+    if sexe:
+        query += " AND sexe = ?"
+        params.append(sexe)
+
+    result = conn.execute(query, params).fetchone()[0]
+    conn.close()
+    return result
+
+
+def get_average_age(year: Optional[int] = None, month: Optional[int] = None,
+                    department: Optional[str] = None, sexe: Optional[int] = None) -> Optional[float]:
+    """Get average age at death with optional filters."""
+    conn = get_connection()
+
+    query = "SELECT AVG(age_deces) FROM deces WHERE age_deces IS NOT NULL"
+    params = []
+
+    if year:
+        query += " AND annee_deces = ?"
+        params.append(year)
+    if month:
+        query += " AND mois_deces = ?"
+        params.append(month)
+    if department:
+        query += " AND departement = ?"
+        params.append(department)
+    if sexe:
+        query += " AND sexe = ?"
+        params.append(sexe)
+
+    result = conn.execute(query, params).fetchone()[0]
+    conn.close()
+    return round(result, 1) if result else None
+
+
+def get_yoy_evolution(year: int, month: Optional[int] = None,
+                      department: Optional[str] = None, sexe: Optional[int] = None) -> Optional[float]:
+    """Calculate year-over-year evolution percentage."""
+    current = get_total_deaths(year, month, department, sexe)
+    previous = get_total_deaths(year - 1, month, department, sexe)
+
+    if previous and previous > 0:
+        return round(((current - previous) / previous) * 100, 1)
+    return None
+
+
+def get_daily_deaths(year: int, month: Optional[int] = None,
+                     department: Optional[str] = None, sexe: Optional[int] = None) -> pd.DataFrame:
+    """Get daily death counts for time series."""
+    conn = get_connection()
+
+    query = """
+        SELECT datedeces, COUNT(*) as count
+        FROM deces
+        WHERE annee_deces = ?
+    """
+    params = [year]
+
+    if month:
+        query += " AND mois_deces = ?"
+        params.append(month)
+    if department:
+        query += " AND departement = ?"
+        params.append(department)
+    if sexe:
+        query += " AND sexe = ?"
+        params.append(sexe)
+
+    query += " GROUP BY datedeces ORDER BY datedeces"
+
+    df = conn.execute(query, params).df()
+    conn.close()
+    return df
+
+
+def get_deaths_by_month_day(year: int, department: Optional[str] = None,
+                            sexe: Optional[int] = None) -> pd.DataFrame:
+    """Get death counts grouped by month and day for heatmap."""
+    conn = get_connection()
+
+    query = """
+        SELECT mois_deces as month, jour_deces as day, COUNT(*) as count
+        FROM deces
+        WHERE annee_deces = ?
+    """
+    params = [year]
+
+    if department:
+        query += " AND departement = ?"
+        params.append(department)
+    if sexe:
+        query += " AND sexe = ?"
+        params.append(sexe)
+
+    query += " GROUP BY mois_deces, jour_deces ORDER BY mois_deces, jour_deces"
+
+    df = conn.execute(query, params).df()
+    conn.close()
+    return df
+
+
+def get_age_pyramid_data(year: Optional[int] = None, month: Optional[int] = None,
+                         department: Optional[str] = None) -> pd.DataFrame:
+    """Get age distribution by sex for pyramid chart."""
+    conn = get_connection()
+
+    query = """
+        SELECT
+            CAST(FLOOR(age_deces / 5) * 5 AS INTEGER) as age_group,
+            sexe,
+            COUNT(*) as count
+        FROM deces
+        WHERE age_deces IS NOT NULL AND sexe IN (1, 2)
+    """
+    params = []
+
+    if year:
+        query += " AND annee_deces = ?"
+        params.append(year)
+    if month:
+        query += " AND mois_deces = ?"
+        params.append(month)
+    if department:
+        query += " AND departement = ?"
+        params.append(department)
+
+    query += " GROUP BY age_group, sexe ORDER BY age_group"
+
+    df = conn.execute(query, params).df()
+    conn.close()
+    return df
+
+
+def get_deaths_by_department(year: Optional[int] = None, month: Optional[int] = None,
+                             sexe: Optional[int] = None) -> pd.DataFrame:
+    """Get death counts by department for map."""
+    conn = get_connection()
+
+    query = """
+        SELECT departement as code, COUNT(*) as count
+        FROM deces
+        WHERE departement IS NOT NULL AND departement != '00'
+    """
+    params = []
+
+    if year:
+        query += " AND annee_deces = ?"
+        params.append(year)
+    if month:
+        query += " AND mois_deces = ?"
+        params.append(month)
+    if sexe:
+        query += " AND sexe = ?"
+        params.append(sexe)
+
+    query += " GROUP BY departement ORDER BY departement"
+
+    df = conn.execute(query, params).df()
+    conn.close()
+    return df
+
+
+def get_database_stats() -> dict:
+    """Get database statistics."""
+    conn = get_connection()
+
+    stats = {
+        'total_records': conn.execute("SELECT COUNT(*) FROM deces").fetchone()[0],
+        'date_range': conn.execute("""
+            SELECT MIN(datedeces), MAX(datedeces) FROM deces
+        """).fetchone(),
+        'departments_count': conn.execute("""
+            SELECT COUNT(DISTINCT departement) FROM deces WHERE departement != '00'
+        """).fetchone()[0],
+        'imports_count': conn.execute("SELECT COUNT(*) FROM import_logs").fetchone()[0]
+    }
+
+    conn.close()
+    return stats
+
+
+def get_import_history() -> pd.DataFrame:
+    """Get import history log."""
+    conn = get_connection()
+    df = conn.execute("""
+        SELECT filename, import_date, rows_added, rows_duplicates, status
+        FROM import_logs
+        ORDER BY import_date DESC
+        LIMIT 50
+    """).df()
+    conn.close()
+    return df
+
+
+# ============================================================================
+# GEOJSON MANAGEMENT
+# ============================================================================
+
+def download_geojson() -> bool:
+    """Download French departments GeoJSON if not exists."""
+    if GEOJSON_PATH.exists():
+        return True
+
+    try:
+        response = requests.get(GEOJSON_URL, timeout=30)
+        response.raise_for_status()
+
+        with open(GEOJSON_PATH, 'w', encoding='utf-8') as f:
+            f.write(response.text)
+
+        return True
+    except Exception as e:
+        print(f"Erreur téléchargement GeoJSON: {e}")
+        return False
+
+
+def get_geojson() -> Optional[dict]:
+    """Load GeoJSON for French departments."""
+    import json
+
+    if not GEOJSON_PATH.exists():
+        if not download_geojson():
+            return None
+
+    try:
+        with open(GEOJSON_PATH, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+# Initialize database on module import
+init_database()
