@@ -92,7 +92,7 @@ def main():
     excel_path = 'population_francaise.xlsx'
 
     # Years to generate (we'll use 2023 data for all years)
-    years = [2019, 2020, 2021, 2022, 2023]
+    years = [2019, 2020, 2021, 2022, 2023, 2024, 2025]
 
     print("Reading Excel file...")
     with zipfile.ZipFile(excel_path, 'r') as zip_ref:
@@ -200,7 +200,7 @@ def main():
     print("  - population_dept.csv: Population by department and year")
     print("  - population_age.csv: Population by age group and year")
     print("  - population_complete.csv: Complete matrix (dept x age x year)")
-    print("\nNote: 2023 INSEE data is used for all years (2019-2023)")
+    print("\nNote: 2023 INSEE data is used for all years (2019-2025)")
 
 if __name__ == "__main__":
     main()
