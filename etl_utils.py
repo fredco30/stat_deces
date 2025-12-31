@@ -324,19 +324,25 @@ def import_csv_batch(file_content: bytes, filename: str, progress_callback=None)
             conn.execute("DROP TABLE IF EXISTS temp_import")
 
             # Load CSV into temp table - DuckDB reads CSV at GB/s speed
+            # Use quote='"' to handle quoted values properly
             conn.execute(f"""
                 CREATE TEMP TABLE temp_import AS
-                SELECT * FROM read_csv_auto('{tmp_path}',
+                SELECT * FROM read_csv('{tmp_path}',
                     delim=';',
                     header=true,
                     ignore_errors=true,
                     all_varchar=true,
-                    normalize_names=true
+                    quote='"',
+                    escape='"'
                 )
             """)
 
             # Get row count
             total_rows = conn.execute("SELECT COUNT(*) FROM temp_import").fetchone()[0]
+
+            # Get actual column names from the imported table
+            columns_info = conn.execute("DESCRIBE temp_import").fetchall()
+            actual_columns = [col[0].lower().strip().replace('"', '') for col in columns_info]
 
         except Exception as e:
             os.unlink(tmp_path)
@@ -352,19 +358,43 @@ def import_csv_batch(file_content: bytes, filename: str, progress_callback=None)
             except TypeError:
                 progress_callback(0.3)
 
-        # Normalize column names (handle variations)
-        conn.execute("""
+        # Build dynamic column mapping based on actual columns
+        # Expected columns: nomprenom, sexe, datenaiss, lieunaiss, commnaiss, paysnaiss, datedeces, lieudeces, actedeces
+        def find_column(expected, actual_cols):
+            """Find matching column name (handles quotes, case, etc.)"""
+            expected_lower = expected.lower()
+            for col in actual_cols:
+                col_clean = col.lower().strip().replace('"', '')
+                if col_clean == expected_lower:
+                    return col
+            return None
+
+        # Get original column names from DuckDB
+        orig_columns = [col[0] for col in columns_info]
+
+        # Map expected columns to actual columns
+        col_map = {}
+        for expected in ['nomprenom', 'sexe', 'datenaiss', 'lieunaiss', 'commnaiss', 'paysnaiss', 'datedeces', 'lieudeces', 'actedeces']:
+            for orig_col in orig_columns:
+                if orig_col.lower().strip().replace('"', '') == expected:
+                    col_map[expected] = f'"{orig_col}"'
+                    break
+            if expected not in col_map:
+                col_map[expected] = "''"  # Default empty string if column not found
+
+        # Normalize column names using dynamic mapping
+        conn.execute(f"""
             CREATE TEMP TABLE temp_normalized AS
             SELECT
-                COALESCE(nomprenom, '') as nomprenom,
-                COALESCE(sexe, '0') as sexe,
-                COALESCE(datenaiss, '') as datenaiss,
-                COALESCE(lieunaiss, '') as lieunaiss,
-                COALESCE(commnaiss, '') as commnaiss,
-                COALESCE(paysnaiss, '') as paysnaiss,
-                COALESCE(datedeces, '') as datedeces,
-                COALESCE(lieudeces, '') as lieudeces,
-                COALESCE(actedeces, '') as actedeces
+                COALESCE({col_map.get('nomprenom', "''")}, '') as nomprenom,
+                COALESCE({col_map.get('sexe', "'0'")}, '0') as sexe,
+                COALESCE({col_map.get('datenaiss', "''")}, '') as datenaiss,
+                COALESCE({col_map.get('lieunaiss', "''")}, '') as lieunaiss,
+                COALESCE({col_map.get('commnaiss', "''")}, '') as commnaiss,
+                COALESCE({col_map.get('paysnaiss', "''")}, '') as paysnaiss,
+                COALESCE({col_map.get('datedeces', "''")}, '') as datedeces,
+                COALESCE({col_map.get('lieudeces', "''")}, '') as lieudeces,
+                COALESCE({col_map.get('actedeces', "''")}, '') as actedeces
             FROM temp_import
         """)
 
