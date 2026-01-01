@@ -480,7 +480,11 @@ def import_csv_batch(file_content: bytes, filename: str, progress_callback=None)
         for expected in ['nomprenom', 'sexe', 'datenaiss', 'lieunaiss', 'commnaiss', 'paysnaiss', 'datedeces', 'lieudeces', 'actedeces']:
             for orig_col in orig_columns:
                 if orig_col.lower().strip().replace('"', '') == expected:
-                    col_map[expected] = f'"{orig_col}"'
+                    # Use column name as-is if it already has quotes, otherwise add them
+                    if orig_col.startswith('"') and orig_col.endswith('"'):
+                        col_map[expected] = orig_col
+                    else:
+                        col_map[expected] = f'"{orig_col}"'
                     break
             if expected not in col_map:
                 col_map[expected] = "''"  # Default empty string if column not found
