@@ -1228,7 +1228,7 @@ def render_age_trends_tab(year, month, dept, sex):
             xaxis_title="Année",
             yaxis_title="Nombre de décès",
             height=500,
-            hovermode='x unified',
+            hovermode='closest',
             legend=dict(
                 orientation="v",
                 yanchor="top",
