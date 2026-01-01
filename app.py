@@ -421,14 +421,14 @@ def render_synthesis_tab(year, month, dept, sex):
     available_years = etl_utils.get_available_years()
 
     if available_years:
-        # Collect data only for years with deaths
+        # Collect data only for years with significant deaths (>= 1000)
         years_list = []
         deaths_list = []
 
         for y in available_years:
             count = etl_utils.get_total_deaths(y, month, dept, sex)
-            # Only include years with actual data
-            if count > 0:
+            # Only include years with at least 1000 deaths (filter out incomplete data)
+            if count >= 1000:
                 years_list.append(str(y))
                 deaths_list.append(count)
 
