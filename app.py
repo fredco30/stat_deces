@@ -458,6 +458,11 @@ def render_synthesis_tab(year, month, dept, sex):
                     type='category',  # Force categorical
                     categoryorder='array',
                     categoryarray=years_list
+                ),
+                hoverlabel=dict(
+                    bgcolor="white",
+                    font_size=30,
+                    font_family="Arial"
                 )
             )
             st.plotly_chart(fig, use_container_width=True)
@@ -493,7 +498,12 @@ def render_synthesis_tab(year, month, dept, sex):
                 showlegend=False,
                 xaxis_title="",
                 yaxis_title="Nombre de décès",
-                height=350
+                height=350,
+                hoverlabel=dict(
+                    bgcolor="white",
+                    font_size=30,
+                    font_family="Arial"
+                )
             )
             st.plotly_chart(fig, use_container_width=True)
 
@@ -512,7 +522,14 @@ def render_synthesis_tab(year, month, dept, sex):
                 color_discrete_map={'Hommes': '#3498db', 'Femmes': '#e74c3c'},
                 hole=0.4
             )
-            fig.update_layout(height=350)
+            fig.update_layout(
+                height=350,
+                hoverlabel=dict(
+                    bgcolor="white",
+                    font_size=30,
+                    font_family="Arial"
+                )
+            )
             st.plotly_chart(fig, use_container_width=True)
 
 
@@ -624,7 +641,12 @@ def render_analysis_tab(year, month, dept, sex):
             borderwidth=1
         ),
         plot_bgcolor='rgba(250, 250, 250, 0.5)',
-        font=dict(size=12)
+        font=dict(size=12),
+        hoverlabel=dict(
+            bgcolor="white",
+            font_size=30,
+            font_family="Arial"
+        )
     )
 
     # Ajouter une grille pour faciliter la lecture
@@ -682,7 +704,14 @@ def render_analysis_tab(year, month, dept, sex):
                 color_continuous_scale='YlOrRd',
                 aspect='auto'
             )
-            fig.update_layout(height=450)
+            fig.update_layout(
+                height=450,
+                hoverlabel=dict(
+                    bgcolor="white",
+                    font_size=30,
+                    font_family="Arial"
+                )
+            )
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("Données insuffisantes pour la heatmap")
@@ -737,7 +766,12 @@ def render_analysis_tab(year, month, dept, sex):
                 ),
                 yaxis=dict(title='Tranche d\'âge'),
                 height=450,
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                hoverlabel=dict(
+                    bgcolor="white",
+                    font_size=30,
+                    font_family="Arial"
+                )
             )
             st.plotly_chart(fig, use_container_width=True)
         else:
@@ -814,6 +848,11 @@ def render_geography_tab(year, month, sex):
                         thickness=15,
                         lenmode="pixels",
                         len=200
+                    ),
+                    hoverlabel=dict(
+                        bgcolor="white",
+                        font_size=30,
+                        font_family="Arial"
                     )
                 )
 
@@ -849,6 +888,11 @@ def render_geography_tab(year, month, sex):
                         thickness=15,
                         lenmode="pixels",
                         len=200
+                    ),
+                    hoverlabel=dict(
+                        bgcolor="white",
+                        font_size=30,
+                        font_family="Arial"
                     )
                 )
 
@@ -882,6 +926,11 @@ def render_geography_tab(year, month, sex):
                     thickness=20,
                     lenmode="pixels",
                     len=300
+                ),
+                hoverlabel=dict(
+                    bgcolor="white",
+                    font_size=30,
+                    font_family="Arial"
                 )
             )
 
@@ -935,7 +984,15 @@ def render_geography_tab(year, month, sex):
             fig.update_yaxes(categoryorder='total ascending', row=1, col=1)
             fig.update_yaxes(categoryorder='total ascending', row=1, col=2)
 
-            fig.update_layout(height=400, showlegend=False)
+            fig.update_layout(
+                height=400,
+                showlegend=False,
+                hoverlabel=dict(
+                    bgcolor="white",
+                    font_size=30,
+                    font_family="Arial"
+                )
+            )
 
             st.plotly_chart(fig, use_container_width=True)
         else:
@@ -954,7 +1011,12 @@ def render_geography_tab(year, month, sex):
                 xaxis_title="Décès",
                 yaxis_title="Département",
                 height=400,
-                yaxis={'categoryorder': 'total ascending'}
+                yaxis={'categoryorder': 'total ascending'},
+                hoverlabel=dict(
+                    bgcolor="white",
+                    font_size=30,
+                    font_family="Arial"
+                )
             )
 
             st.plotly_chart(fig, use_container_width=True)
@@ -1174,6 +1236,11 @@ def render_age_trends_tab(year, month, dept, sex):
                 xanchor="right",
                 x=0.99,
                 bgcolor="rgba(255, 255, 255, 0.8)"
+            ),
+            hoverlabel=dict(
+                bgcolor="white",
+                font_size=30,
+                font_family="Arial"
             )
         )
 
@@ -1208,7 +1275,14 @@ def render_age_trends_tab(year, month, dept, sex):
                 aspect='auto'
             )
 
-            fig.update_layout(height=500)
+            fig.update_layout(
+                height=500,
+                hoverlabel=dict(
+                    bgcolor="white",
+                    font_size=30,
+                    font_family="Arial"
+                )
+            )
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("Sélectionnez plusieurs années pour afficher la heatmap.")
@@ -1239,7 +1313,12 @@ def render_age_trends_tab(year, month, dept, sex):
                 fig.update_layout(
                     showlegend=False,
                     height=500,
-                    yaxis={'categoryorder': 'total ascending'}
+                    yaxis={'categoryorder': 'total ascending'},
+                    hoverlabel=dict(
+                        bgcolor="white",
+                        font_size=30,
+                        font_family="Arial"
+                    )
                 )
 
                 st.plotly_chart(fig, use_container_width=True)
@@ -1313,7 +1392,12 @@ def render_age_trends_tab(year, month, dept, sex):
                         yaxis=dict(title=''),
                         height=400,
                         showlegend=True,
-                        legend=dict(orientation="h", y=1.05)
+                        legend=dict(orientation="h", y=1.05),
+                        hoverlabel=dict(
+                            bgcolor="white",
+                            font_size=30,
+                            font_family="Arial"
+                        )
                     )
 
                     st.plotly_chart(fig, use_container_width=True)
