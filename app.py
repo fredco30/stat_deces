@@ -404,7 +404,7 @@ def render_synthesis_tab(year, month, dept, sex, age_group=None):
         )
 
     with col2:
-        avg_age = etl_utils.get_average_age(year, month, dept, sex)
+        avg_age = etl_utils.get_average_age(year, month, dept, sex, age_group)
         st.metric(
             label="👤 Âge moyen",
             value=f"{avg_age:.1f} ans" if avg_age else "N/A"
@@ -683,7 +683,7 @@ def render_analysis_tab(year, month, dept, sex, age_group=None):
         for idx, selected_year in enumerate(sorted(selected_years, reverse=True)):
             with stats_cols[idx]:
                 total_year = etl_utils.get_total_deaths(selected_year, month, dept, sex, age_group)
-                avg_age = etl_utils.get_average_age(selected_year, month, dept, sex)
+                avg_age = etl_utils.get_average_age(selected_year, month, dept, sex, age_group)
 
                 st.metric(
                     label=f"📅 {selected_year}",
@@ -701,7 +701,7 @@ def render_analysis_tab(year, month, dept, sex, age_group=None):
         # Graph 2: Calendar Heatmap
         st.markdown(f"#### 🗓️ Heatmap Calendaire ({display_year})")
 
-        df_heatmap = etl_utils.get_deaths_by_month_day(display_year, dept, sex)
+        df_heatmap = etl_utils.get_deaths_by_month_day(display_year, dept, sex, age_group)
 
         if not df_heatmap.empty:
             # Pivot for heatmap
@@ -808,9 +808,9 @@ def render_geography_tab(year, month, sex, age_group=None):
 
     # Get department data with rates
     if year:
-        df_dept = etl_utils.get_deaths_by_department_with_rates(year, month, sex)
+        df_dept = etl_utils.get_deaths_by_department_with_rates(year, month, sex, age_group)
     else:
-        df_dept = etl_utils.get_deaths_by_department(year, month, sex)
+        df_dept = etl_utils.get_deaths_by_department(year, month, sex, age_group)
         df_dept['population'] = None
         df_dept['rate'] = None
 
