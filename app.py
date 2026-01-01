@@ -204,6 +204,26 @@ def render_sidebar():
         format_func=lambda x: sexes[x]
     )
 
+    # Age group filter
+    age_groups = {
+        None: "Tous",
+        (0, 9): "0-9 ans",
+        (10, 19): "10-19 ans",
+        (20, 29): "20-29 ans",
+        (30, 39): "30-39 ans",
+        (40, 49): "40-49 ans",
+        (50, 59): "50-59 ans",
+        (60, 69): "60-69 ans",
+        (70, 79): "70-79 ans",
+        (80, 89): "80-89 ans",
+        (90, 120): "90+ ans"
+    }
+    selected_age_group = st.sidebar.selectbox(
+        "Tranche d'âge",
+        options=list(age_groups.keys()),
+        format_func=lambda x: age_groups[x]
+    )
+
     st.sidebar.markdown("---")
 
     # Database stats
@@ -215,7 +235,7 @@ def render_sidebar():
     if stats['date_range'][0] and stats['date_range'][1]:
         st.sidebar.caption(f"Période: {stats['date_range'][0]} à {stats['date_range'][1]}")
 
-    return selected_year, selected_month, selected_dept, selected_sex
+    return selected_year, selected_month, selected_dept, selected_sex, selected_age_group
 
 
 # ============================================================================
@@ -363,12 +383,12 @@ def render_import_tab():
 # SYNTHESIS TAB (KPIs)
 # ============================================================================
 
-def render_synthesis_tab(year, month, dept, sex):
+def render_synthesis_tab(year, month, dept, sex, age_group=None):
     """Render the synthesis dashboard with KPIs."""
     st.markdown("### 📊 Tableau de bord - Synthèse")
 
     # Check if data exists
-    total = etl_utils.get_total_deaths(year, month, dept, sex)
+    total = etl_utils.get_total_deaths(year, month, dept, sex, age_group)
 
     if total == 0:
         st.warning("Aucune donnée disponible pour les filtres sélectionnés. Veuillez importer des données.")
@@ -384,7 +404,7 @@ def render_synthesis_tab(year, month, dept, sex):
         )
 
     with col2:
-        avg_age = etl_utils.get_average_age(year, month, dept, sex)
+        avg_age = etl_utils.get_average_age(year, month, dept, sex, age_group)
         st.metric(
             label="👤 Âge moyen",
             value=f"{avg_age:.1f} ans" if avg_age else "N/A"
@@ -405,8 +425,8 @@ def render_synthesis_tab(year, month, dept, sex):
 
     with col4:
         # Deaths by sex
-        hommes = etl_utils.get_total_deaths(year, month, dept, 1)
-        femmes = etl_utils.get_total_deaths(year, month, dept, 2)
+        hommes = etl_utils.get_total_deaths(year, month, dept, 1, age_group)
+        femmes = etl_utils.get_total_deaths(year, month, dept, 2, age_group)
         ratio = (hommes / femmes * 100) if femmes > 0 else 0
         st.metric(
             label="⚖️ Ratio H/F",
@@ -426,7 +446,7 @@ def render_synthesis_tab(year, month, dept, sex):
         deaths_list = []
 
         for y in available_years:
-            count = etl_utils.get_total_deaths(y, month, dept, sex)
+            count = etl_utils.get_total_deaths(y, month, dept, sex, age_group)
             # Only include years with at least 1000 deaths (filter out incomplete data)
             if count >= 1000:
                 years_list.append(str(y))
@@ -479,7 +499,7 @@ def render_synthesis_tab(year, month, dept, sex):
             st.markdown(f"#### Décès par mois ({year})")
             monthly_data = []
             for m in range(1, 13):
-                count = etl_utils.get_total_deaths(year, m, dept, sex)
+                count = etl_utils.get_total_deaths(year, m, dept, sex, age_group)
                 monthly_data.append({'Mois': m, 'Décès': count})
 
             df_monthly = pd.DataFrame(monthly_data)
@@ -537,7 +557,7 @@ def render_synthesis_tab(year, month, dept, sex):
 # VISUAL ANALYSIS TAB
 # ============================================================================
 
-def render_analysis_tab(year, month, dept, sex):
+def render_analysis_tab(year, month, dept, sex, age_group=None):
     """Render visual analysis dashboard."""
     st.markdown("### 📈 Analyse Visuelle")
 
@@ -662,8 +682,8 @@ def render_analysis_tab(year, month, dept, sex):
 
         for idx, selected_year in enumerate(sorted(selected_years, reverse=True)):
             with stats_cols[idx]:
-                total_year = etl_utils.get_total_deaths(selected_year, month, dept, sex)
-                avg_age = etl_utils.get_average_age(selected_year, month, dept, sex)
+                total_year = etl_utils.get_total_deaths(selected_year, month, dept, sex, age_group)
+                avg_age = etl_utils.get_average_age(selected_year, month, dept, sex, age_group)
 
                 st.metric(
                     label=f"📅 {selected_year}",
@@ -681,7 +701,7 @@ def render_analysis_tab(year, month, dept, sex):
         # Graph 2: Calendar Heatmap
         st.markdown(f"#### 🗓️ Heatmap Calendaire ({display_year})")
 
-        df_heatmap = etl_utils.get_deaths_by_month_day(display_year, dept, sex)
+        df_heatmap = etl_utils.get_deaths_by_month_day(display_year, dept, sex, age_group)
 
         if not df_heatmap.empty:
             # Pivot for heatmap
@@ -720,7 +740,7 @@ def render_analysis_tab(year, month, dept, sex):
         # Graph 3: Age Pyramid
         st.markdown(f"#### 👥 Pyramide des âges ({display_year})")
 
-        df_pyramid = etl_utils.get_age_pyramid_data(display_year, month, dept)
+        df_pyramid = etl_utils.get_age_pyramid_data(display_year, month, dept, sex, age_group)
 
         if not df_pyramid.empty:
             # Separate men and women
@@ -782,15 +802,15 @@ def render_analysis_tab(year, month, dept, sex):
 # GEOGRAPHY TAB
 # ============================================================================
 
-def render_geography_tab(year, month, sex):
+def render_geography_tab(year, month, sex, age_group=None):
     """Render geographic analysis with choropleth map."""
     st.markdown("### 🗺️ Analyse Géographique")
 
     # Get department data with rates
     if year:
-        df_dept = etl_utils.get_deaths_by_department_with_rates(year, month, sex)
+        df_dept = etl_utils.get_deaths_by_department_with_rates(year, month, sex, age_group)
     else:
-        df_dept = etl_utils.get_deaths_by_department(year, month, sex)
+        df_dept = etl_utils.get_deaths_by_department(year, month, sex, age_group)
         df_dept['population'] = None
         df_dept['rate'] = None
 
@@ -1045,7 +1065,7 @@ def render_geography_tab(year, month, sex):
 # AGE TRENDS TAB
 # ============================================================================
 
-def render_age_trends_tab(year, month, dept, sex):
+def render_age_trends_tab(year, month, dept, sex, age_group=None):
     """Render age trends analysis dashboard."""
     st.markdown("### 📈 Tendances de Mortalité par Âge")
 
@@ -1116,15 +1136,15 @@ def render_age_trends_tab(year, month, dept, sex):
     st.markdown("---")
 
     # Get KPI data
-    total_deaths = sum([etl_utils.get_total_deaths(y, month, dept, sex) for y in selected_years])
+    total_deaths = sum([etl_utils.get_total_deaths(y, month, dept, sex, age_group) for y in selected_years])
 
     # Median age for most recent year
-    median_data = etl_utils.get_median_age_by_year([display_year])
+    median_data = etl_utils.get_median_age_by_year([display_year], month, dept, sex, age_group)
     median_age = median_data.iloc[0]['median_age'] if not median_data.empty else None
 
     # Most affected age group
     most_affected_age, most_affected_count = etl_utils.get_most_affected_age_group(
-        display_year, age_group_size
+        display_year, age_group_size, month, dept, sex, age_group
     )
 
     # Evolution vs previous year (for display_year)
@@ -1133,8 +1153,8 @@ def render_age_trends_tab(year, month, dept, sex):
         sorted_years = sorted(selected_years)
         if display_year in sorted_years and display_year == sorted_years[-1]:
             prev_year = sorted_years[-2]
-            current_deaths = etl_utils.get_total_deaths(display_year, month, dept, sex)
-            prev_deaths = etl_utils.get_total_deaths(prev_year, month, dept, sex)
+            current_deaths = etl_utils.get_total_deaths(display_year, month, dept, sex, age_group)
+            prev_deaths = etl_utils.get_total_deaths(prev_year, month, dept, sex, age_group)
             if prev_deaths and prev_deaths > 0:
                 evolution = ((current_deaths - prev_deaths) / prev_deaths) * 100
 
@@ -1191,7 +1211,8 @@ def render_age_trends_tab(year, month, dept, sex):
         year_filter=selected_years,
         month=month,
         dept=dept,
-        sexe=sex
+        sexe=sex,
+        age_group=age_group
     )
 
     if not df_trends.empty:
@@ -1348,7 +1369,7 @@ def render_age_trends_tab(year, month, dept, sex):
             with cols[idx]:
                 st.markdown(f"**Année {comp_year}**")
 
-                df_pyramid = etl_utils.get_age_pyramid_data(comp_year, month, dept)
+                df_pyramid = etl_utils.get_age_pyramid_data(comp_year, month, dept, sex, age_group)
 
                 if not df_pyramid.empty:
                     # Separate men and women
@@ -1482,7 +1503,8 @@ def render_age_trends_tab(year, month, dept, sex):
                     age_group_size=age_group_size,
                     month=month,
                     dept=dept,
-                    sexe=sex
+                    sexe=sex,
+                    age_group=age_group
                 )
 
                 # Create download button
@@ -1511,7 +1533,7 @@ def main():
         return
 
     # Render sidebar and get filters
-    year, month, dept, sex = render_sidebar()
+    year, month, dept, sex, age_group = render_sidebar()
 
     # Main header
     st.markdown("# 📊 Mortalité France - Tableau de Bord")
@@ -1530,16 +1552,16 @@ def main():
         render_import_tab()
 
     with tab2:
-        render_synthesis_tab(year, month, dept, sex)
+        render_synthesis_tab(year, month, dept, sex, age_group)
 
     with tab3:
-        render_analysis_tab(year, month, dept, sex)
+        render_analysis_tab(year, month, dept, sex, age_group)
 
     with tab4:
-        render_geography_tab(year, month, sex)
+        render_geography_tab(year, month, sex, age_group)
 
     with tab5:
-        render_age_trends_tab(year, month, dept, sex)
+        render_age_trends_tab(year, month, dept, sex, age_group)
 
 
 if __name__ == "__main__":

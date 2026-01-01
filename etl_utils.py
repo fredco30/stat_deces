@@ -658,7 +658,8 @@ def get_available_departments() -> List[str]:
 
 
 def get_total_deaths(year: Optional[int] = None, month: Optional[int] = None,
-                     department: Optional[str] = None, sexe: Optional[int] = None) -> int:
+                     department: Optional[str] = None, sexe: Optional[int] = None,
+                     age_group: Optional[tuple] = None) -> int:
     """Get total death count with optional filters."""
     with db_connection(read_only=True) as conn:
         query = "SELECT COUNT(*) FROM deces WHERE 1=1"
@@ -676,13 +677,19 @@ def get_total_deaths(year: Optional[int] = None, month: Optional[int] = None,
         if sexe:
             query += " AND sexe = ?"
             params.append(sexe)
+        if age_group:
+            age_min, age_max = age_group
+            query += " AND age_deces >= ? AND age_deces <= ?"
+            params.append(age_min)
+            params.append(age_max)
 
         result = conn.execute(query, params).fetchone()[0]
         return result
 
 
 def get_average_age(year: Optional[int] = None, month: Optional[int] = None,
-                    department: Optional[str] = None, sexe: Optional[int] = None) -> Optional[float]:
+                    department: Optional[str] = None, sexe: Optional[int] = None,
+                    age_group: Optional[tuple] = None) -> Optional[float]:
     """Get average age at death with optional filters."""
     with db_connection(read_only=True) as conn:
         query = "SELECT AVG(age_deces) FROM deces WHERE age_deces IS NOT NULL"
@@ -700,6 +707,11 @@ def get_average_age(year: Optional[int] = None, month: Optional[int] = None,
         if sexe:
             query += " AND sexe = ?"
             params.append(sexe)
+        if age_group:
+            age_min, age_max = age_group
+            query += " AND age_deces >= ? AND age_deces <= ?"
+            params.append(age_min)
+            params.append(age_max)
 
         result = conn.execute(query, params).fetchone()[0]
         return round(result, 1) if result else None
@@ -746,7 +758,7 @@ def get_daily_deaths(year: int, month: Optional[int] = None,
 
 
 def get_deaths_by_month_day(year: int, department: Optional[str] = None,
-                            sexe: Optional[int] = None) -> pd.DataFrame:
+                            sexe: Optional[int] = None, age_group: Optional[tuple] = None) -> pd.DataFrame:
     """Get death counts grouped by month and day for heatmap."""
     with db_connection(read_only=True) as conn:
 
@@ -763,16 +775,22 @@ def get_deaths_by_month_day(year: int, department: Optional[str] = None,
         if sexe:
             query += " AND sexe = ?"
             params.append(sexe)
+        if age_group:
+            age_min, age_max = age_group
+            query += " AND age_deces >= ? AND age_deces <= ?"
+            params.append(age_min)
+            params.append(age_max)
 
         query += " GROUP BY mois_deces, jour_deces ORDER BY mois_deces, jour_deces"
 
         df = conn.execute(query, params).df()
-        
+
     return df
 
 
 def get_age_pyramid_data(year: Optional[int] = None, month: Optional[int] = None,
-                         department: Optional[str] = None) -> pd.DataFrame:
+                         department: Optional[str] = None, sexe: Optional[int] = None,
+                         age_group: Optional[tuple] = None) -> pd.DataFrame:
     """Get age distribution by sex for pyramid chart."""
     with db_connection(read_only=True) as conn:
 
@@ -795,16 +813,24 @@ def get_age_pyramid_data(year: Optional[int] = None, month: Optional[int] = None
         if department:
             query += " AND departement = ?"
             params.append(department)
+        if sexe:
+            query += " AND sexe = ?"
+            params.append(sexe)
+        if age_group:
+            age_min, age_max = age_group
+            query += " AND age_deces >= ? AND age_deces <= ?"
+            params.append(age_min)
+            params.append(age_max)
 
         query += " GROUP BY age_group, sexe ORDER BY age_group"
 
         df = conn.execute(query, params).df()
-        
+
     return df
 
 
 def get_deaths_by_year(month: Optional[int] = None, department: Optional[str] = None,
-                       sexe: Optional[int] = None) -> pd.DataFrame:
+                       sexe: Optional[int] = None, age_group: Optional[tuple] = None) -> pd.DataFrame:
     """Get death counts by year for time series."""
     with db_connection(read_only=True) as conn:
 
@@ -824,6 +850,11 @@ def get_deaths_by_year(month: Optional[int] = None, department: Optional[str] = 
         if sexe:
             query += " AND sexe = ?"
             params.append(sexe)
+        if age_group:
+            age_min, age_max = age_group
+            query += " AND age_deces >= ? AND age_deces <= ?"
+            params.append(age_min)
+            params.append(age_max)
 
         query += " GROUP BY annee_deces ORDER BY annee_deces"
 
@@ -833,7 +864,7 @@ def get_deaths_by_year(month: Optional[int] = None, department: Optional[str] = 
 
 
 def get_deaths_by_department(year: Optional[int] = None, month: Optional[int] = None,
-                             sexe: Optional[int] = None) -> pd.DataFrame:
+                             sexe: Optional[int] = None, age_group: Optional[tuple] = None) -> pd.DataFrame:
     """Get death counts by department for map."""
     with db_connection(read_only=True) as conn:
 
@@ -853,11 +884,16 @@ def get_deaths_by_department(year: Optional[int] = None, month: Optional[int] = 
         if sexe:
             query += " AND sexe = ?"
             params.append(sexe)
+        if age_group:
+            age_min, age_max = age_group
+            query += " AND age_deces >= ? AND age_deces <= ?"
+            params.append(age_min)
+            params.append(age_max)
 
         query += " GROUP BY departement ORDER BY departement"
 
         df = conn.execute(query, params).df()
-        
+
     return df
 
 
@@ -1054,9 +1090,9 @@ def calculate_mortality_rate(deaths: int, population: int, per: int = 100000) ->
 
 
 def get_deaths_by_department_with_rates(year: Optional[int] = None, month: Optional[int] = None,
-                                         sexe: Optional[int] = None) -> pd.DataFrame:
+                                         sexe: Optional[int] = None, age_group: Optional[tuple] = None) -> pd.DataFrame:
     """Get death counts by department with population and mortality rates."""
-    df_deaths = get_deaths_by_department(year, month, sexe)
+    df_deaths = get_deaths_by_department(year, month, sexe, age_group)
 
     if df_deaths.empty or not year:
         return df_deaths
@@ -1089,7 +1125,7 @@ def get_deaths_by_department_with_rates(year: Optional[int] = None, month: Optio
 
 def get_mortality_by_age_year(age_group_size: int = 5, year_filter: Optional[List[int]] = None,
                                month: Optional[int] = None, dept: Optional[str] = None,
-                               sexe: Optional[int] = None) -> pd.DataFrame:
+                               sexe: Optional[int] = None, age_group: Optional[tuple] = None) -> pd.DataFrame:
     """
     Get mortality data grouped by age and year for heatmap and trends.
 
@@ -1099,6 +1135,7 @@ def get_mortality_by_age_year(age_group_size: int = 5, year_filter: Optional[Lis
         month: Filter by month
         dept: Filter by department
         sexe: Filter by sex
+        age_group: Filter by age range (age_min, age_max)
 
     Returns:
         DataFrame with columns: age_group, annee, deaths, population, rate
@@ -1131,6 +1168,12 @@ def get_mortality_by_age_year(age_group_size: int = 5, year_filter: Optional[Lis
         if sexe:
             query += " AND sexe = ?"
             params.append(sexe)
+
+        if age_group:
+            age_min, age_max = age_group
+            query += " AND age_deces >= ? AND age_deces <= ?"
+            params.append(age_min)
+            params.append(age_max)
 
         query += " GROUP BY age_group, annee_deces ORDER BY age_group, annee_deces"
 
@@ -1228,7 +1271,9 @@ def get_age_trends_summary(years: List[int], age_group_size: int = 5) -> pd.Data
     return pd.DataFrame(result)
 
 
-def get_median_age_by_year(years: Optional[List[int]] = None) -> pd.DataFrame:
+def get_median_age_by_year(years: Optional[List[int]] = None, month: Optional[int] = None,
+                           dept: Optional[str] = None, sexe: Optional[int] = None,
+                           age_group: Optional[tuple] = None) -> pd.DataFrame:
     """Get median age of death by year."""
     with db_connection(read_only=True) as conn:
 
@@ -1247,22 +1292,49 @@ def get_median_age_by_year(years: Optional[List[int]] = None) -> pd.DataFrame:
             query += f" AND annee_deces IN ({placeholders})"
             params.extend(years)
 
+        if month:
+            query += " AND mois_deces = ?"
+            params.append(month)
+
+        if dept:
+            query += " AND departement = ?"
+            params.append(dept)
+
+        if sexe:
+            query += " AND sexe = ?"
+            params.append(sexe)
+
+        if age_group:
+            age_min, age_max = age_group
+            query += " AND age_deces >= ? AND age_deces <= ?"
+            params.append(age_min)
+            params.append(age_max)
+
         query += " GROUP BY annee_deces ORDER BY annee_deces"
 
         df = conn.execute(query, params).df()
-        
+
 
     return df
 
 
-def get_most_affected_age_group(year: int, age_group_size: int = 5) -> Tuple[Optional[int], Optional[int]]:
+def get_most_affected_age_group(year: int, age_group_size: int = 5, month: Optional[int] = None,
+                                dept: Optional[str] = None, sexe: Optional[int] = None,
+                                age_group: Optional[tuple] = None) -> Tuple[Optional[int], Optional[int]]:
     """
     Get the most affected age group for a specific year.
 
     Returns:
         Tuple of (age_group, death_count)
     """
-    df = get_mortality_by_age_year(age_group_size=age_group_size, year_filter=[year])
+    df = get_mortality_by_age_year(
+        age_group_size=age_group_size,
+        year_filter=[year],
+        month=month,
+        dept=dept,
+        sexe=sexe,
+        age_group=age_group
+    )
 
     if df.empty:
         return None, None
@@ -1277,7 +1349,7 @@ def get_most_affected_age_group(year: int, age_group_size: int = 5) -> Tuple[Opt
 
 def export_age_trends_to_excel(years: List[int], age_group_size: int = 5,
                                 month: Optional[int] = None, dept: Optional[str] = None,
-                                sexe: Optional[int] = None) -> bytes:
+                                sexe: Optional[int] = None, age_group: Optional[tuple] = None) -> bytes:
     """
     Export age trends data to Excel format with filters enabled.
 
@@ -1287,6 +1359,7 @@ def export_age_trends_to_excel(years: List[int], age_group_size: int = 5,
         month: Filter by month
         dept: Filter by department
         sexe: Filter by sex
+        age_group: Filter by age range (age_min, age_max)
 
     Returns:
         Bytes of Excel file
@@ -1299,7 +1372,8 @@ def export_age_trends_to_excel(years: List[int], age_group_size: int = 5,
         year_filter=years,
         month=month,
         dept=dept,
-        sexe=sexe
+        sexe=sexe,
+        age_group=age_group
     )
 
     if df.empty:
