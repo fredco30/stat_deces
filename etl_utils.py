@@ -688,7 +688,8 @@ def get_total_deaths(year: Optional[int] = None, month: Optional[int] = None,
 
 
 def get_average_age(year: Optional[int] = None, month: Optional[int] = None,
-                    department: Optional[str] = None, sexe: Optional[int] = None) -> Optional[float]:
+                    department: Optional[str] = None, sexe: Optional[int] = None,
+                    age_group: Optional[tuple] = None) -> Optional[float]:
     """Get average age at death with optional filters."""
     with db_connection(read_only=True) as conn:
         query = "SELECT AVG(age_deces) FROM deces WHERE age_deces IS NOT NULL"
@@ -706,6 +707,11 @@ def get_average_age(year: Optional[int] = None, month: Optional[int] = None,
         if sexe:
             query += " AND sexe = ?"
             params.append(sexe)
+        if age_group:
+            age_min, age_max = age_group
+            query += " AND age_deces >= ? AND age_deces <= ?"
+            params.append(age_min)
+            params.append(age_max)
 
         result = conn.execute(query, params).fetchone()[0]
         return round(result, 1) if result else None
@@ -752,7 +758,7 @@ def get_daily_deaths(year: int, month: Optional[int] = None,
 
 
 def get_deaths_by_month_day(year: int, department: Optional[str] = None,
-                            sexe: Optional[int] = None) -> pd.DataFrame:
+                            sexe: Optional[int] = None, age_group: Optional[tuple] = None) -> pd.DataFrame:
     """Get death counts grouped by month and day for heatmap."""
     with db_connection(read_only=True) as conn:
 
@@ -769,11 +775,16 @@ def get_deaths_by_month_day(year: int, department: Optional[str] = None,
         if sexe:
             query += " AND sexe = ?"
             params.append(sexe)
+        if age_group:
+            age_min, age_max = age_group
+            query += " AND age_deces >= ? AND age_deces <= ?"
+            params.append(age_min)
+            params.append(age_max)
 
         query += " GROUP BY mois_deces, jour_deces ORDER BY mois_deces, jour_deces"
 
         df = conn.execute(query, params).df()
-        
+
     return df
 
 
@@ -810,7 +821,7 @@ def get_age_pyramid_data(year: Optional[int] = None, month: Optional[int] = None
 
 
 def get_deaths_by_year(month: Optional[int] = None, department: Optional[str] = None,
-                       sexe: Optional[int] = None) -> pd.DataFrame:
+                       sexe: Optional[int] = None, age_group: Optional[tuple] = None) -> pd.DataFrame:
     """Get death counts by year for time series."""
     with db_connection(read_only=True) as conn:
 
@@ -830,6 +841,11 @@ def get_deaths_by_year(month: Optional[int] = None, department: Optional[str] = 
         if sexe:
             query += " AND sexe = ?"
             params.append(sexe)
+        if age_group:
+            age_min, age_max = age_group
+            query += " AND age_deces >= ? AND age_deces <= ?"
+            params.append(age_min)
+            params.append(age_max)
 
         query += " GROUP BY annee_deces ORDER BY annee_deces"
 
@@ -839,7 +855,7 @@ def get_deaths_by_year(month: Optional[int] = None, department: Optional[str] = 
 
 
 def get_deaths_by_department(year: Optional[int] = None, month: Optional[int] = None,
-                             sexe: Optional[int] = None) -> pd.DataFrame:
+                             sexe: Optional[int] = None, age_group: Optional[tuple] = None) -> pd.DataFrame:
     """Get death counts by department for map."""
     with db_connection(read_only=True) as conn:
 
@@ -859,11 +875,16 @@ def get_deaths_by_department(year: Optional[int] = None, month: Optional[int] = 
         if sexe:
             query += " AND sexe = ?"
             params.append(sexe)
+        if age_group:
+            age_min, age_max = age_group
+            query += " AND age_deces >= ? AND age_deces <= ?"
+            params.append(age_min)
+            params.append(age_max)
 
         query += " GROUP BY departement ORDER BY departement"
 
         df = conn.execute(query, params).df()
-        
+
     return df
 
 
@@ -1060,9 +1081,9 @@ def calculate_mortality_rate(deaths: int, population: int, per: int = 100000) ->
 
 
 def get_deaths_by_department_with_rates(year: Optional[int] = None, month: Optional[int] = None,
-                                         sexe: Optional[int] = None) -> pd.DataFrame:
+                                         sexe: Optional[int] = None, age_group: Optional[tuple] = None) -> pd.DataFrame:
     """Get death counts by department with population and mortality rates."""
-    df_deaths = get_deaths_by_department(year, month, sexe)
+    df_deaths = get_deaths_by_department(year, month, sexe, age_group)
 
     if df_deaths.empty or not year:
         return df_deaths
