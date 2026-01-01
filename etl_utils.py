@@ -658,7 +658,8 @@ def get_available_departments() -> List[str]:
 
 
 def get_total_deaths(year: Optional[int] = None, month: Optional[int] = None,
-                     department: Optional[str] = None, sexe: Optional[int] = None) -> int:
+                     department: Optional[str] = None, sexe: Optional[int] = None,
+                     age_group: Optional[tuple] = None) -> int:
     """Get total death count with optional filters."""
     with db_connection(read_only=True) as conn:
         query = "SELECT COUNT(*) FROM deces WHERE 1=1"
@@ -676,6 +677,11 @@ def get_total_deaths(year: Optional[int] = None, month: Optional[int] = None,
         if sexe:
             query += " AND sexe = ?"
             params.append(sexe)
+        if age_group:
+            age_min, age_max = age_group
+            query += " AND age_deces >= ? AND age_deces <= ?"
+            params.append(age_min)
+            params.append(age_max)
 
         result = conn.execute(query, params).fetchone()[0]
         return result
