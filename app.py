@@ -1239,8 +1239,9 @@ def render_age_trends_tab(year, month, dept, sex):
             ),
             hoverlabel=dict(
                 bgcolor="white",
-                font_size=30,
-                font_family="Arial"
+                font_size=15,
+                font_family="Arial",
+                namelength=-1
             )
         )
 
@@ -1279,8 +1280,9 @@ def render_age_trends_tab(year, month, dept, sex):
                 height=500,
                 hoverlabel=dict(
                     bgcolor="white",
-                    font_size=30,
-                    font_family="Arial"
+                    font_size=15,
+                    font_family="Arial",
+                    namelength=-1
                 )
             )
             st.plotly_chart(fig, use_container_width=True)
@@ -1316,8 +1318,9 @@ def render_age_trends_tab(year, month, dept, sex):
                     yaxis={'categoryorder': 'total ascending'},
                     hoverlabel=dict(
                         bgcolor="white",
-                        font_size=30,
-                        font_family="Arial"
+                        font_size=15,
+                        font_family="Arial",
+                        namelength=-1
                     )
                 )
 
@@ -1395,8 +1398,9 @@ def render_age_trends_tab(year, month, dept, sex):
                         legend=dict(orientation="h", y=1.05),
                         hoverlabel=dict(
                             bgcolor="white",
-                            font_size=30,
-                            font_family="Arial"
+                            font_size=15,
+                            font_family="Arial",
+                            namelength=-1
                         )
                     )
 
