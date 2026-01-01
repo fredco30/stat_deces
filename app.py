@@ -740,7 +740,7 @@ def render_analysis_tab(year, month, dept, sex, age_group=None):
         # Graph 3: Age Pyramid
         st.markdown(f"#### 👥 Pyramide des âges ({display_year})")
 
-        df_pyramid = etl_utils.get_age_pyramid_data(display_year, month, dept)
+        df_pyramid = etl_utils.get_age_pyramid_data(display_year, month, dept, sex, age_group)
 
         if not df_pyramid.empty:
             # Separate men and women
@@ -1139,12 +1139,12 @@ def render_age_trends_tab(year, month, dept, sex, age_group=None):
     total_deaths = sum([etl_utils.get_total_deaths(y, month, dept, sex, age_group) for y in selected_years])
 
     # Median age for most recent year
-    median_data = etl_utils.get_median_age_by_year([display_year])
+    median_data = etl_utils.get_median_age_by_year([display_year], month, dept, sex, age_group)
     median_age = median_data.iloc[0]['median_age'] if not median_data.empty else None
 
     # Most affected age group
     most_affected_age, most_affected_count = etl_utils.get_most_affected_age_group(
-        display_year, age_group_size
+        display_year, age_group_size, month, dept, sex, age_group
     )
 
     # Evolution vs previous year (for display_year)
@@ -1211,7 +1211,8 @@ def render_age_trends_tab(year, month, dept, sex, age_group=None):
         year_filter=selected_years,
         month=month,
         dept=dept,
-        sexe=sex
+        sexe=sex,
+        age_group=age_group
     )
 
     if not df_trends.empty:
@@ -1368,7 +1369,7 @@ def render_age_trends_tab(year, month, dept, sex, age_group=None):
             with cols[idx]:
                 st.markdown(f"**Année {comp_year}**")
 
-                df_pyramid = etl_utils.get_age_pyramid_data(comp_year, month, dept)
+                df_pyramid = etl_utils.get_age_pyramid_data(comp_year, month, dept, sex, age_group)
 
                 if not df_pyramid.empty:
                     # Separate men and women
@@ -1502,7 +1503,8 @@ def render_age_trends_tab(year, month, dept, sex, age_group=None):
                     age_group_size=age_group_size,
                     month=month,
                     dept=dept,
-                    sexe=sex
+                    sexe=sex,
+                    age_group=age_group
                 )
 
                 # Create download button
