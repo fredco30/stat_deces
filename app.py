@@ -1250,14 +1250,18 @@ def render_age_trends_tab(year, month, dept, sex, age_group=None):
             yaxis_title="Nombre de décès",
             height=500,
             hovermode='closest',
+            xaxis=dict(domain=[0, 0.85]),  # Limite le graphique à 85% de la largeur
             legend=dict(
                 orientation="v",
                 yanchor="top",
-                y=0.99,
-                xanchor="right",
-                x=0.99,
-                bgcolor="rgba(255, 255, 255, 0.8)"
+                y=1.0,
+                xanchor="left",
+                x=1.02,  # Place la légende en dehors du graphique
+                bgcolor="rgba(255, 255, 255, 0.9)",
+                bordercolor="rgba(0, 0, 0, 0.2)",
+                borderwidth=1
             ),
+            margin=dict(r=150),  # Marge droite pour la légende
             hoverlabel=dict(
                 bgcolor="white",
                 font_size=15,
