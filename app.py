@@ -1130,6 +1130,44 @@ def render_age_trends_tab(year, month, dept, sex, age_group=None):
     display_year = max(selected_years)
 
     # ========================================================================
+    # EVOLUTION COMPARISON SELECTOR
+    # ========================================================================
+
+    if len(selected_years) >= 2:
+        st.markdown("---")
+        st.markdown("#### 📊 Configuration de la comparaison d'évolution")
+
+        col_comp1, col_comp2, col_comp3 = st.columns([1, 1, 2])
+
+        with col_comp1:
+            # Année de référence (année de départ)
+            default_ref_year = sorted(selected_years)[-2] if len(selected_years) >= 2 else selected_years[0]
+            comparison_year_ref = st.selectbox(
+                "Année de référence",
+                options=sorted(selected_years),
+                index=sorted(selected_years).index(default_ref_year) if default_ref_year in selected_years else 0,
+                help="Année de départ pour le calcul de l'évolution"
+            )
+
+        with col_comp2:
+            # Année de comparaison (année d'arrivée)
+            default_comp_year = max(selected_years)
+            available_comp_years = [y for y in selected_years if y != comparison_year_ref]
+
+            if available_comp_years:
+                comparison_year_target = st.selectbox(
+                    "Année cible",
+                    options=sorted(available_comp_years),
+                    index=len(available_comp_years) - 1,  # Dernière année par défaut
+                    help="Année cible pour le calcul de l'évolution"
+                )
+            else:
+                comparison_year_target = comparison_year_ref
+
+        with col_comp3:
+            st.info(f"📈 Calcul de l'évolution entre **{comparison_year_ref}** et **{comparison_year_target}**")
+
+    # ========================================================================
     # KPIs SECTION
     # ========================================================================
 
@@ -1147,16 +1185,17 @@ def render_age_trends_tab(year, month, dept, sex, age_group=None):
         display_year, age_group_size, month, dept, sex, age_group
     )
 
-    # Evolution vs previous year (for display_year)
+    # Evolution vs selected comparison years
     evolution = None
+    evolution_label = "📊 Évolution"
+
     if len(selected_years) >= 2:
-        sorted_years = sorted(selected_years)
-        if display_year in sorted_years and display_year == sorted_years[-1]:
-            prev_year = sorted_years[-2]
-            current_deaths = etl_utils.get_total_deaths(display_year, month, dept, sex, age_group)
-            prev_deaths = etl_utils.get_total_deaths(prev_year, month, dept, sex, age_group)
-            if prev_deaths and prev_deaths > 0:
-                evolution = ((current_deaths - prev_deaths) / prev_deaths) * 100
+        ref_deaths = etl_utils.get_total_deaths(comparison_year_ref, month, dept, sex, age_group)
+        target_deaths = etl_utils.get_total_deaths(comparison_year_target, month, dept, sex, age_group)
+
+        if ref_deaths and ref_deaths > 0 and target_deaths:
+            evolution = ((target_deaths - ref_deaths) / ref_deaths) * 100
+            evolution_label = f"📊 Évolution {comparison_year_ref} → {comparison_year_target}"
 
     # Display KPIs
     col1, col2, col3, col4 = st.columns(4)
@@ -1190,13 +1229,13 @@ def render_age_trends_tab(year, month, dept, sex, age_group=None):
     with col4:
         if evolution is not None:
             st.metric(
-                label=f"📊 Évolution {sorted_years[-2]} → {display_year}",
+                label=evolution_label,
                 value=f"{evolution:+.1f}%",
                 delta=f"{evolution:.1f}%",
                 delta_color="inverse"
             )
         else:
-            st.metric(label="📊 Évolution", value="N/A")
+            st.metric(label=evolution_label, value="N/A")
 
     st.markdown("---")
 
